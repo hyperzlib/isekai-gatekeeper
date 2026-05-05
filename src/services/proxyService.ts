@@ -1,4 +1,5 @@
 import http from "node:http";
+import { gunzipSync, brotliDecompressSync, inflateSync } from "node:zlib";
 import httpProxy from "http-proxy";
 import type Koa from "koa";
 import type { AppConfig, SiteConfig } from "../types/config.ts";
@@ -42,6 +43,19 @@ function renderHeaders(
     result[key] = render(tplCtx);
   }
   return result;
+}
+
+function decodeContentEncoding(body: Buffer, encoding: string): Buffer {
+  encoding = encoding.toLowerCase().trim();
+  if (encoding === "gzip") {
+    return gunzipSync(body);
+  } else if (encoding === "br") {
+    return brotliDecompressSync(body);
+  } else if (encoding === "deflate") {
+    return inflateSync(body);
+  } else {
+    return body;
+  }
 }
 
 export class ProxyService {
@@ -94,14 +108,26 @@ export class ProxyService {
     proxyRes.on("data", (chunk: Buffer) => chunks.push(chunk));
     proxyRes.on("end", () => {
       this.pendingCache.delete(incomingReq);
-      const body = Buffer.concat(chunks);
+      let rawBody: Buffer<ArrayBufferLike> = Buffer.concat(chunks);
 
       if (status === 200 && this.appConfig.cache.allowed_mimetypes.includes(contentType)) {
         try {
-          const bodyText = body.toString("utf-8");
+          const cachedHeaders = { ...responseHeaders };
+
+          // 解压缩响应体
+          const contentEncoding = (responseHeaders["content-encoding"] ?? "").toLowerCase().trim();
+          if (contentEncoding) {
+            rawBody = decodeContentEncoding(rawBody, contentEncoding);
+
+            // 移除编码相关 header，更新 content-length
+            delete cachedHeaders["content-encoding"];
+            cachedHeaders["content-length"] = String(rawBody.length);
+          }
+
+          const bodyText = rawBody.toString("utf-8");
           this.cacheService.set<PageCacheEntry>(pending.cacheKey, {
             status,
-            headers: responseHeaders,
+            headers: cachedHeaders,
             body: bodyText,
             cachedAt: Date.now(),
             ttl: pending.ttl,

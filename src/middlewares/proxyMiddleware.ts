@@ -1,5 +1,6 @@
 import Koa from "koa";
 import { CHALLENGE_PATH_PREFIX } from "../routes/challengeRoutes";
+import { validateChallengePassCookie } from "../services/tokenService";
 
 export const reverseProxyMiddleware: Koa.Middleware = async (ctx, next) => {
   // 挑战路径直接透传（由 challengeRoutes 处理）
@@ -17,7 +18,7 @@ export const reverseProxyMiddleware: Koa.Middleware = async (ctx, next) => {
   const decision = ctx.decision;
 
   if (ctx.appConfig.cache.bypass_after_challenge && decision.browser_challenge?.enabled) {
-    const isChallengePassed = await ctx.firewallService.validateChallengePassCookie(ctx);
+    const isChallengePassed = await validateChallengePassCookie(ctx);
     if (isChallengePassed) {
       decision.cache = { enabled: false };
     }

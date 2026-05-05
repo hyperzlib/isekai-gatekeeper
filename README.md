@@ -40,11 +40,18 @@
   - [x] 缓存管理API
 - [x] 验证码功能
   - [x] Google reCAPTCHA
-  - [x] hCaptcha
   - [x] GeeTest
+  - [ ] hCaptcha (需要测试)
+  - [ ] Fun Captcha (需要测试)
+  - [ ] Aliyun CAPTCHA (需要测试)
+  - [ ] Tencent Cloud CAPTCHA (需要测试)
+  - [ ] Cloudflare Turnstile (需要测试)
 - [x] GeoIP功能
   - [x] 基于 GeoIP 的访问控制
 - [ ] 限流功能
   - [ ] 限流基础功能
   - [ ] 针对已通过验证码的用户的限流（再次验证）
   - [ ] 针对服务器负载的动态限流
+- [ ] 多语言支持
+  - [ ] 前端界面国际化支持
+  - [ ] 文档翻译

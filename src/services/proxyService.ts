@@ -124,7 +124,13 @@ export class ProxyService {
   selectSite(ctx: Koa.Context): { id: string, config: SiteConfig } | null {
     const host = (ctx.headers["host"] ?? "").split(":")[0] ?? "";
     for (const [siteId, site] of Object.entries(this.appConfig.sites)) {
-      if (site.hostname === host) return { id: siteId, config: site };
+      if (Array.isArray(site.hostname)) {
+        if (site.hostname.includes(host)) {
+          return { id: siteId, config: site };
+        }
+      } else if (site.hostname === host) {
+        return { id: siteId, config: site };
+      }
     }
     return null;
   }
@@ -179,8 +185,11 @@ export class ProxyService {
 
       // 设置附加请求头
       const extraHeaders: Record<string, string> = {
-        "X-Forwarded-For": ctx.ip,
         "X-Real-IP": ctx.ip,
+        "X-Forwarded-For": ctx.ip,
+        "X-Forwarded-Proto": ctx.protocol,
+        "X-Forwarded-Host": ctx.headers["host"] ?? "",
+        "Forwarded": `by=isekai-gatekeeper; for=${ctx.ip}; proto=${ctx.protocol}; host=${ctx.headers["host"] ?? ""}`,
       };
       if (site.backend.hostname) {
         extraHeaders["host"] = site.backend.hostname;

@@ -40,13 +40,13 @@ const RuleSchema = z.object({
 //#endregion
 
 const BackendSchema = z.object({
-  url: z.string().url(),
   hostname: z.string().optional(),
+  url: z.string().url(),
   headers: z.record(z.string()).optional(),
 });
 
 const SiteSchema = z.object({
-  hostname: z.string().min(1),
+  hostname: z.union([z.string(), z.array(z.string())]),
   backend: BackendSchema,
   rules: z.array(RuleSchema).optional(),
 });

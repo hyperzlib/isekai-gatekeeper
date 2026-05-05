@@ -4,14 +4,15 @@ import { RuleConfig } from "./rule";
 /** 站点后端配置 */
 export interface BackendConfig {
   url: string;
+  /** 可选，默认为 Host header，用于发送给同一个 Nginx 后端 */
   hostname?: string;
   headers?: Record<string, HandlebarsTemplateDelegate<any>>;
 }
 
 /** 站点配置 */
 export interface SiteConfig {
-  /** 对外 hostname（用于匹配 Host 请求头） */
-  hostname: string;
+  /** 匹配 Host 请求头 */
+  hostname: string | string[];
   backend: BackendConfig;
   rules?: RuleConfig[];
 }

@@ -10,7 +10,9 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
-    "build": "tsc"
+    "build": "tsc",
+    "build:bundle": "bun build src/main.ts --outdir dist --target bun --format cjs --minify",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "@koa/bodyparser": "^5.1.1",

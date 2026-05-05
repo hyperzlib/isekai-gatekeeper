@@ -90,7 +90,11 @@ async function showCaptcha() {
 }
 
 function redirectAfterSuccess() {
-  location.href = REDIRECT_URL;
+  if (REDIRECT_URL === '' || REDIRECT_URL === '.') {
+    location.reload();
+  } else {
+    location.href = REDIRECT_URL;
+  }
 }
 
 /**

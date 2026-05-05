@@ -33,6 +33,7 @@ function makeConfig(
       max_body_bytes: 1_000_000,
       cache_key_mode: "path+query",
       allowed_mimetypes: ["text/html"],
+      bypass_after_challenge: true,
     },
     sites: {
       "test.com": {

@@ -71,6 +71,7 @@ export class ProxyService {
     this.proxy.on("proxyRes", this.onProxyRes);
 
     this.proxy.on("error", (err, _req, res) => {
+      console.error("[ProxyService] Proxy error:", err);
       if (res instanceof http.ServerResponse && !res.headersSent) {
         res.writeHead(502, { "Content-Type": "text/plain" });
         res.end("Bad Gateway");
@@ -231,6 +232,7 @@ export class ProxyService {
         ctx.respond = false;
         res.once("finish", settleResolve);
         this.proxy.web(req, res, { target: site.backend.url }, (err) => {
+          console.error("[ProxyService] Proxy error:", err);
           if (!res.headersSent) {
             res.writeHead(502, { "Content-Type": "text/plain" });
             res.end("Bad Gateway");
@@ -251,6 +253,7 @@ export class ProxyService {
       });
 
       this.proxy.web(req, res, { target: site.backend.url }, (err) => {
+        console.error("[ProxyService] Proxy error:", err);
         this.pendingCache.delete(req);
         if (!res.headersSent) {
           res.writeHead(502, { "Content-Type": "text/plain" });

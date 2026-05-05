@@ -43,8 +43,9 @@ const EXAMPLE_REQUEST = {
   },
 } as const;
 
-const expressionGlobalKeys = new Set<keyof ExpressionGlobal>([
-  'ctx', 'http', 'presets', 'state'
+let expressionGlobalKeys = new Set<keyof ExpressionGlobal>([
+  'ctx', 'http', 'presets', 'state',
+  ...Object.keys(ruleExpressionTools) as (keyof RuleExpressionTools)[]
 ]);
 
 function validateConditionSyntax(id: string, condition: string): void {
@@ -122,7 +123,13 @@ export class RuleEngineService {
         raw: rule,
         matcher: compileCondition(app, rule.id, rule.condition),
       }));
-      this.compiledSites.set(site.hostname, { rules: compiled, siteConfig: site });
+      if (Array.isArray(site.hostname)) {
+        for (const hostname of site.hostname) {
+          this.compiledSites.set(hostname, { rules: compiled, siteConfig: site });
+        }
+      } else if (typeof site.hostname === "string") {
+        this.compiledSites.set(site.hostname, { rules: compiled, siteConfig: site });
+      }
     }
   }
 

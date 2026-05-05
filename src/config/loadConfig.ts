@@ -230,8 +230,17 @@ export function loadConfig(): AppConfig {
     for (const [key, tpl] of Object.entries(site.backend.headers ?? {})) {
       headerTemplates[key] = Handlebars.compile(tpl);
     }
+
+    let hostname = site.hostname;
+    if (Array.isArray(hostname)) {
+      hostname = hostname.map((h) => h.toLowerCase());
+    } else {
+      hostname = hostname.toLowerCase();
+    }
+
     sites[name] = {
       ...site,
+      hostname,
       backend: {
         ...site.backend,
         headers: headerTemplates,

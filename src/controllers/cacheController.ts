@@ -5,8 +5,14 @@ import { makePageCacheKey } from "../utils/cache.ts";
 function resolveSiteIdByHostname(ctx: Koa.Context, hostname: string): string | null {
   const normalized = hostname.toLowerCase();
   for (const [siteId, siteConfig] of Object.entries(ctx.appConfig.sites)) {
-    if (siteConfig.hostname.toLowerCase() === normalized) {
-      return siteId;
+    if (Array.isArray(siteConfig.hostname)) {
+      if (siteConfig.hostname.includes(normalized)) {
+        return siteId;
+      }
+    } else if (typeof siteConfig.hostname === "string") {
+      if (siteConfig.hostname === normalized) {
+        return siteId;
+      }
     }
   }
   return null;

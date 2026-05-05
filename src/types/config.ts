@@ -94,7 +94,7 @@ export interface TencentProviderConfig {
 }
 
 export interface CaptchaConfig {
-  enabled?: boolean;
+  enabled: boolean;
   type?: CaptchaProvider;
   recaptcha: RecaptchaProviderConfig;
   hcaptcha: HCaptchaProviderConfig;

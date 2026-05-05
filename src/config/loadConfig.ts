@@ -101,7 +101,7 @@ const TencentProviderSchema = z.object({
 
 const CaptchaSchema = z.object({
   type: CaptchaProviderSchema.optional(),
-  enabled: z.boolean().optional(),
+  enabled: z.boolean().default(false),
   recaptcha: RecaptchaProviderSchema.default({ site_key: "", secret_key: "" }),
   hcaptcha: HCaptchaProviderSchema.default({ site_key: "", secret_key: "" }),
   geetest: GeeTestProviderSchema.default({ id: "", key: "" }),
@@ -120,7 +120,7 @@ const BunRedisConfigSchema = z.object({
 
 const AppConfigSchema = z.object({
   debug: z.boolean().optional(),
-  templates_dir: z.string().min(1).optional(),
+  templates_dir: z.string().min(1).default("./views"),
   proxy: z.object({
     server_port: z.number().int().min(1).max(65535),
   }),
@@ -162,10 +162,19 @@ const AppConfigSchema = z.object({
 
 /**
  * 校验 active captcha provider：
- * captcha.type 对应的 provider 必须 enabled=true 且凭据非空。
+ * - captcha.enabled=true 时，type 不能为空
+ * - captcha.type 对应的 provider 凭据非空。
  */
 function validateActiveProvider(captcha: CaptchaConfig): void {
-  const type = captcha.type!;
+  if (!captcha.enabled) return;
+
+  const type = captcha.type;
+  if (!type) {
+    throw new Error(
+      "Config validation failed:\n  field=captcha.type message=captcha.enabled=true 时 type 不能为空",
+    );
+  }
+
   const providerCfg = captcha[type];
 
   // 验证必填凭据非空
@@ -230,8 +239,8 @@ export function loadConfig(): AppConfig {
     };
   }
 
-  // 校验 active captcha provider（仅在 type 已配置时）
-  if (data.captcha?.type) {
+  // 校验 active captcha provider（captcha 节存在时）
+  if (data.captcha) {
     validateActiveProvider(data.captcha);
   }
 

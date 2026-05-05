@@ -1,3 +1,6 @@
+debug = false
+templates_dir = "./views"
+
 [proxy]
 server_port = 8080
 
@@ -16,53 +19,60 @@ difficulty = 16           # 前导零 bit 数
 
 [cache]
 enabled = true
-provider = "memory"        # 可选 "memory" 或 "bun+redis"
-default_ttl = 60            # 秒
+provider = "memory"          # 可选 "memory" 或 "bun+redis"
+default_ttl = 60              # 秒
+cache_key_mode = "path+query" # 可选 "path+query" 或 "path"
 max_entries = 1000
-max_body_bytes = 1048576  # 1 MiB
+max_body_bytes = 1048576    # 1 MiB
+allowed_mimetypes = ["text/html", "application/json", "text/plain", "text/css", "application/javascript", "text/javascript"]
 
 [cache.bun_redis]
 url = "redis://localhost:6379"
 
+# ── GeoIP (可选) ────────────────────────────────────────────────────────────
+# 需要从 https://dev.maxmind.com/geoip/geolite2-free-geolocation-data 下载数据库
+
+[geoip]
+enabled = false
+# db_country_path = "./data/geoip/GeoLite2-Country.mmdb"
+# db_asn_path = "./data/geoip/GeoLite2-ASN.mmdb"
+# db_city_path = "./data/geoip/GeoLite2-City.mmdb"
+
 # ── 验证码 (可选) ──────────────────────────────────────────────────────────
-# 启用时需指定 type 并将对应 provider 的 enabled 设为 true、填入凭据。
-# 不配置整个 [captcha] 或所有 provider enabled=false 则验证码下线。
+# 启用时需取消 [captcha] 的注释、指定 type，并填入对应 provider 的凭据。
+# 不配置整个 [captcha] 或 enabled=false 则验证码下线。
 
 [captcha]
+# enabled = true
 # type = "recaptcha"
 
 [captcha.recaptcha]
-enabled = false
 site_key = ""
 secret_key = ""
+# api_domain = "recaptcha.net"       # 可选，默认为 google.com
+# js_domain = "recaptcha.net"        # 可选，默认为 google.com
 
 [captcha.hcaptcha]
-enabled = false
 site_key = ""
 secret_key = ""
 
 [captcha.geetest]
-enabled = false
 id = ""
 key = ""
 
 [captcha.turnstile]
-enabled = false
 site_key = ""
 secret_key = ""
 
 [captcha.funcaptcha]
-enabled = false
 public_key = ""
 private_key = ""
 
 [captcha.aliyun]
-enabled = false
 access_key_id = ""
 access_key_secret = ""
 
 [captcha.tencent]
-enabled = false
 secret_id = ""
 secret_key = ""
 
@@ -101,7 +111,7 @@ browser_challenge = { enabled = false }
 id = "cache-wiki"
 condition = 'matchGlob(http.request.uri.path, "/wiki/*")'
 last = true
-cache = { enabled = true, ttl = 86400, cacheKeyMode = "path+query" }
+cache = { enabled = true, ttl = 86400, cache_key_mode = "path+query" }
 browser_challenge = { enabled = false }
 
 # 规则：放行来自 CN 的请求

@@ -135,10 +135,6 @@ async function submitCaptcha({ token, extra }) {
 // ── 主流程 ───────────────────────────────────────────────────────────────────
 
 async function main() {
-  // 测试验证码流程
-  showCaptcha();
-  return;
-
   setStatus("正在获取自动验证信息…");
   let challenge, expires, token, difficulty;
   try {

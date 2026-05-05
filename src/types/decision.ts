@@ -5,7 +5,7 @@ import { RuleAction } from "./rule";
 export interface CachePolicy {
   enabled: boolean;
   ttl: number;
-  cacheKeyMode: CacheKeyModeType;
+  cache_key_mode: CacheKeyModeType;
 }
 
 /** 合并后的浏览器挑战策略 */

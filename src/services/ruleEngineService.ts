@@ -152,7 +152,7 @@ export class RuleEngineService {
     const defaultCachePolicy: CachePolicy = {
       enabled: this.appConfig.cache.enabled,
       ttl: this.appConfig.cache.default_ttl,
-      cacheKeyMode: this.appConfig.cache.cache_key_mode,
+      cache_key_mode: this.appConfig.cache.cache_key_mode,
     };
     const defaultChallenge: BrowserChallengePolicy = {
       enabled: this.appConfig.browser_challenge.enabled
@@ -163,7 +163,7 @@ export class RuleEngineService {
         block: false,
         cache: defaultCachePolicy,
         browser_challenge: defaultChallenge,
-        cache_key: makePageCacheKey(ctx.currentSiteId || "unknown", ctx.URL.pathname, ctx.URL.search, defaultCachePolicy.cacheKeyMode),
+        cache_key: makePageCacheKey(ctx.currentSiteId || "unknown", ctx.URL.pathname, ctx.URL.search, defaultCachePolicy.cache_key_mode),
       };
     }
 
@@ -227,7 +227,7 @@ export class RuleEngineService {
     }
 
     const cacheKey = makePageCacheKey(ctx.currentSiteId || "unknown", ctx.URL.pathname, ctx.URL.search,
-      cachePolicy.cache_key_mode ?? defaultCachePolicy.cacheKeyMode);
+      cachePolicy.cache_key_mode ?? defaultCachePolicy.cache_key_mode);
 
     return {
       block: isBlocked,

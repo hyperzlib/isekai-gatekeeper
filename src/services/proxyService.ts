@@ -108,8 +108,18 @@ export class ProxyService {
     const chunks: Buffer[] = [];
     proxyRes.on("data", (chunk: Buffer) => chunks.push(chunk));
     proxyRes.on("end", () => {
+      if (this.appConfig.debug) {
+        console.log(`[ProxyService] Received response: ${status} ${incomingReq.url} (Content-Type: ${contentType}, Cache-Key: ${pending.cacheKey})`);
+      }
+
       this.pendingCache.delete(incomingReq);
       let rawBody: Buffer<ArrayBufferLike> = Buffer.concat(chunks);
+
+      if (rawBody.length === 0) {
+        // 空响应体需要发送一个空行以正确结束 HTTP 响应，否则 Nginx 会返回 502 错误
+        incomingRes.write("\r\n");
+        return;
+      }
 
       if (status === 200 && this.appConfig.cache.allowed_mimetypes.includes(contentType)) {
         try {
@@ -134,9 +144,10 @@ export class ProxyService {
             ttl: pending.ttl,
           }, pending.ttl);
         } catch (err) {
-          console.error("Failed to cache response:", err);
+          console.error("[ProxyService] Failed to cache response:", err);
         }
       }
+
       pending.settleResolve();
     });
     proxyRes.on("error", (err) => {
@@ -201,6 +212,7 @@ export class ProxyService {
       const settleResolve = (): void => {
         if (settled) return;
         settled = true;
+        console.log(`[ProxyService] Finished processing request: ${ctx.method} ${ctx.url} (cache: ${shouldCache ? "enabled" : "disabled"})`);
         resolve();
       };
 

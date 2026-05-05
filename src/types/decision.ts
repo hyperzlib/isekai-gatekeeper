@@ -1,3 +1,5 @@
+import { RuleAction } from "./rule";
+
 /** 缓存键策略 */
 export type CacheKeyStrategy = "path+query" | "path";
 
@@ -14,12 +16,9 @@ export interface BrowserChallengePolicy {
 }
 
 /** 规则引擎的合并决策结果 */
-export interface Decision {
-  allow: boolean;
-  cachePolicy: CachePolicy;
-  browserChallengePolicy: BrowserChallengePolicy;
+export type Decision = RuleAction & {
   /** 根据 cachePolicy.key 计算得出的实际缓存键 */
-  cacheKey: string;
+  cache_key: string;
 }
 
 /** 传入规则条件函数的 HTTP 请求上下文 */

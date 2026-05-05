@@ -70,6 +70,7 @@ export class ProxyService {
     }
 
     const status = proxyRes.statusCode ?? 0;
+    const contentType = proxyRes.headers["content-type"] ?? "";
     const responseHeaders: Record<string, string> = {};
     for (const [k, v] of Object.entries(proxyRes.headers)) {
       if (v !== undefined) {
@@ -83,7 +84,7 @@ export class ProxyService {
       this.pendingCache.delete(incomingReq);
       const body = Buffer.concat(chunks);
 
-      if (status === 200) {
+      if (status === 200 && this.appConfig.cache.allowed_mimetypes.includes(contentType)) {
         this.cacheService.set(pending.cacheKey, {
           status,
           headers: responseHeaders,
@@ -114,7 +115,33 @@ export class ProxyService {
   /**
    * 转发请求到后端，可选缓存响应。
    */
-  forward(ctx: Koa.Context, site: SiteConfig, decision: Decision): Promise<void> {
+  async forward(ctx: Koa.Context, site: SiteConfig, decision: Decision): Promise<void> {
+    const shouldCache =
+      decision.cache?.enabled && ctx.method === "GET";
+
+    // 如果应该缓存，先尝试从缓存中获取
+    if (shouldCache) {
+      const cached = await this.cacheService.get<{
+        status: number;
+        headers: Record<string, string>;
+        body: Uint8Array;
+        cachedAt: number;
+        ttl: number;
+      }>(decision.cache_key);
+
+      if (cached) {
+        const now = Date.now();
+        const age = now - cached.cachedAt;
+        if (age < cached.ttl * 1000) {
+          // 缓存未过期，直接返回
+          ctx.status = cached.status;
+          Object.assign(ctx.headers, cached.headers);
+          ctx.body = cached.body;
+          return;
+        }
+      }
+    }
+
     return new Promise<void>((resolve, reject) => {
       const req = ctx.req;
       const res = ctx.res;
@@ -147,9 +174,6 @@ export class ProxyService {
         req.headers[k] = v;
       }
 
-      const shouldCache =
-        decision.cachePolicy.enabled && ctx.method === "GET";
-
       if (!shouldCache) {
         ctx.respond = false;
         res.once("finish", settleResolve);
@@ -166,8 +190,8 @@ export class ProxyService {
       ctx.respond = false;
       this.pendingCache.set(req, {
         res,
-        cacheKey: decision.cacheKey,
-        ttl: decision.cachePolicy.ttl,
+        cacheKey: decision.cache_key,
+        ttl: decision.cache?.ttl ?? this.appConfig.cache.default_ttl,
         settleResolve,
         settleReject,
       });

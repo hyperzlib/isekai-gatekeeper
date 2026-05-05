@@ -16,9 +16,13 @@ difficulty = 16           # 前导零 bit 数
 
 [cache]
 enabled = true
-ttl = 60                  # 秒
+provider = "memory"        # 可选 "memory" 或 "bunRedis"
+defaultTTL = 60            # 秒
 max_entries = 1000
 max_body_bytes = 1048576  # 1 MiB
+
+[cache.bunRedis]
+url = "redis://localhost:6379"
 
 # ── 验证码 (可选) ──────────────────────────────────────────────────────────
 # 启用时需指定 type 并将对应 provider 的 enabled 设为 true、填入凭据。
@@ -72,27 +76,37 @@ url = "http://127.0.0.1:80"
 hostname = "example.com"
 
 [site.example.backend.headers]
-# "X-Real-IP" = "{{{http.request.headers['X-Forwarded-For']}}}"
+# "X-Real-IP" = "{{{ctx.req.headers['X-Forwarded-For']}}}"
+"X-Proxy-Server" = "isekai-gatekeeper"
+# 兼容 Cloudflare 的 Headers
+"CF-IPCountry" = "{{{ctx.geoip?.country_code ?? 'XX'}}}"
+"CF-Visitor" = '{"scheme":"{{{ctx.protocol}}}"}'
 
-# 规则：放行 robots.txt / sitemap.xml（无挑战）
+# 规则：放行 robots.txt / sitemap.xml
 [[site.example.rules]]
 id = "allow-static"
 description = "allow robots and sitemap"
 condition = '["/robots.txt", "/sitemap.xml"].includes(http.request.uri.path)'
+browser_challenge = { enabled = false }
 
-[site.example.rules.actions.browser_challenge]
-enabled = false
+# 规则：放行预设中的常见搜索引擎爬虫 UA
+[[site.example.rules]]
+id = "allow-bot-user-agent"
+description = "allow bot user agent"
+condition = "presets.isCommonSearchEngineBot"
+browser_challenge = { enabled = false }
 
-# 规则：wiki 页面缓存（无挑战，命中后跳出）
+# 规则：放行 wiki 页面 (返回缓存)
 [[site.example.rules]]
 id = "cache-wiki"
-condition = 'http.request.uri.path.match(/^\\/wiki\\/[^?]+$/)'
+condition = 'matchGlob(http.request.uri.path, "/wiki/*")'
 last = true
+cache = { enabled = true, ttl = 86400, cacheKeyMode = "path+query" }
+browser_challenge = { enabled = false }
 
-[site.example.rules.actions.cache]
-enabled = true
-ttl = 300
-key = "path+query"
-
-[site.example.rules.actions.browser_challenge]
-enabled = false
+# 规则：放行来自 CN 的请求
+[[site.example.rules]]
+id = "allow-cn"
+description = "allow traffic from China"
+condition = 'ctx.geoip?.countryCode === "CN"'
+browser_challenge = { enabled = false }

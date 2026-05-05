@@ -1,24 +1,4 @@
-/** 单个规则的 actions 字段 */
-export interface RuleActions {
-  allow?: boolean;
-  cache?: {
-    enabled?: boolean;
-    ttl?: number;
-    cacheKeyMode?: "path+query" | "path";
-  };
-  browser_challenge?: {
-    enabled?: boolean;
-  };
-}
-
-/** 规则配置 */
-export interface RuleConfig {
-  id: string;
-  description?: string;
-  condition: string;
-  actions?: RuleActions;
-  last?: boolean;
-}
+import { RuleConfig } from "./rule";
 
 /** 站点后端配置 */
 export interface BackendConfig {
@@ -38,6 +18,7 @@ export interface SiteConfig {
 /** 浏览器挑战配置 */
 export interface BrowserChallengeConfig {
   enabled: boolean;
+  tpl?: string;
   cookie_ttl: number;
   challenge_ttl: number;
   secret: string;
@@ -46,17 +27,25 @@ export interface BrowserChallengeConfig {
   };
 }
 
+/** Bun redis 配置 */
+export interface BunRedisConfig {
+  url: string;
+}
+
 /** 全局缓存配置 */
 export interface CacheConfig {
   enabled: boolean;
-  ttl: number;
-  cacheKeyMode: "path+query" | "path";
+  provider: "memory" | "bunRedis";
+  bun_redis?: BunRedisConfig;
+
+  default_ttl: number;
+  cache_key_mode: "path+query" | "path";
   max_entries: number;
   max_body_bytes: number;
+  allowed_mimetypes: string[];
 }
 
-// ── 验证码统一配置 ──────────────────────────────────────────────────────────
-
+//#region 验证码配置
 export type CaptchaProvider =
   | "recaptcha"
   | "hcaptcha"
@@ -123,6 +112,7 @@ export interface CaptchaPublicConfig {
   publicKey?: string;      // funcaptcha public_key
   appId?: string;          // tencent secret_id
 }
+//#endregion
 
 /** GeoIP 配置 */
 export interface GeoIPConfig {
@@ -146,7 +136,7 @@ export interface ApiConfig {
 /** 应用全量配置 */
 export interface AppConfig {
   debug?: boolean;
-  templatesDir: string;
+  templates_dir: string;
   proxy: ProxyConfig;
   api: ApiConfig;
   browser_challenge: BrowserChallengeConfig;

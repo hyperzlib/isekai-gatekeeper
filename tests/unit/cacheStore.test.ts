@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { CacheStore } from "../../src/lib/cacheStore.ts";
-import type { CachedResponse } from "../../src/lib/cacheStore.ts";
+import { MemoryCacheStore } from "../../src/lib/memoryCacheStore.ts";
+import { CachedResponse } from "../../src/types/cache.ts";
 
 function makeResp(body: string, ttl = 60): CachedResponse {
   return {
@@ -13,61 +13,71 @@ function makeResp(body: string, ttl = 60): CachedResponse {
 }
 
 describe("CacheStore", () => {
-  it("stores and retrieves entries", () => {
-    const store = new CacheStore(100, 1_000_000);
-    store.set("/foo", makeResp("hello"));
-    const entry = store.get("/foo");
+  it("stores and retrieves entries", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    await store.set("/foo", makeResp("hello"));
+    const entry = await store.get<CachedResponse>("/foo");
     expect(entry).not.toBeNull();
     expect(new TextDecoder().decode(entry!.body)).toBe("hello");
   });
 
-  it("returns null for missing entries", () => {
-    const store = new CacheStore(100, 1_000_000);
-    expect(store.get("/missing")).toBeNull();
+  it("returns null for missing entries", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    const entry = await store.get<CachedResponse>("/missing");
+    expect(entry).toBeNull();
   });
 
-  it("respects max_body_bytes limit", () => {
-    const store = new CacheStore(100, 5); // max 5 bytes
-    store.set("/big", makeResp("hello world")); // 11 bytes > 5
-    expect(store.get("/big")).toBeNull();
+  it("respects max_body_bytes limit", async () => {
+    const store = new MemoryCacheStore(100, 5); // max 5 bytes
+    await store.set("/big", makeResp("hello world")); // 11 bytes > 5
+    const entry = await store.get<CachedResponse>("/big");
+    expect(entry).toBeNull();
   });
 
-  it("evicts LRU entry when max_entries exceeded", () => {
-    const store = new CacheStore(2, 1_000_000);
-    store.set("/a", makeResp("a"));
-    store.set("/b", makeResp("b"));
-    store.set("/c", makeResp("c")); // should evict /a
-    expect(store.get("/a")).toBeNull();
-    expect(store.get("/b")).not.toBeNull();
-    expect(store.get("/c")).not.toBeNull();
+  it("evicts LRU entry when max_entries exceeded", async () => {
+    const store = new MemoryCacheStore(2, 1_000_000);
+    await store.set("/a", makeResp("a"));
+    await store.set("/b", makeResp("b"));
+    await store.set("/c", makeResp("c")); // should evict /a
+    const entryA = await store.get<CachedResponse>("/a");
+    const entryB = await store.get<CachedResponse>("/b");
+    const entryC = await store.get<CachedResponse>("/c");
+    expect(entryA).toBeNull();
+    expect(entryB).not.toBeNull();
+    expect(entryC).not.toBeNull();
   });
 
   it("expires entries by TTL", async () => {
-    const store = new CacheStore(100, 1_000_000);
-    store.set("/exp", makeResp("expire", 0)); // ttl=0 → immediate expiry
+    const store = new MemoryCacheStore(100, 1_000_000);
+    await store.set("/exp", makeResp("expire", 0)); // ttl=0 → immediate expiry
     // Force expiry by setting expiresAt in the past — access internal Map via cast
     const storeAny = store as unknown as { store: Map<string, { resp: CachedResponse; expiresAt: number }> };
     const entry = storeAny.store.get("/exp");
     if (entry) entry.expiresAt = Date.now() - 1;
-    expect(store.get("/exp")).toBeNull();
+    const expiredEntry = await store.get<CachedResponse>("/exp");
+    expect(expiredEntry).toBeNull();
   });
 
-  it("deletes entries by exact key", () => {
-    const store = new CacheStore(100, 1_000_000);
-    store.set("/del", makeResp("x"));
-    store.delete("/del");
-    expect(store.get("/del")).toBeNull();
+  it("deletes entries by exact key", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    await store.set("/del", makeResp("x"));
+    await store.delete("/del");
+    const entry = await store.get<CachedResponse>("/del");
+    expect(entry).toBeNull();
   });
 
-  it("deleteByPrefix removes matching entries and returns count", () => {
-    const store = new CacheStore(100, 1_000_000);
-    store.set("/wiki/A", makeResp("a"));
-    store.set("/wiki/B", makeResp("b"));
-    store.set("/other", makeResp("c"));
-    const count = store.deleteByPrefix("/wiki/");
+  it("deleteByPrefix removes matching entries and returns count", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    await store.set("/wiki/A", makeResp("a"));
+    await store.set("/wiki/B", makeResp("b"));
+    await store.set("/other", makeResp("c"));
+    const count = await store.deleteByPrefix("/wiki/");
     expect(count).toBe(2);
-    expect(store.get("/wiki/A")).toBeNull();
-    expect(store.get("/wiki/B")).toBeNull();
-    expect(store.get("/other")).not.toBeNull();
+    const entryA = await store.get<CachedResponse>("/wiki/A");
+    const entryB = await store.get<CachedResponse>("/wiki/B");
+    const entryC = await store.get<CachedResponse>("/other");
+    expect(entryA).toBeNull();
+    expect(entryB).toBeNull();
+    expect(entryC).not.toBeNull();
   });
 });

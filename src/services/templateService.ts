@@ -56,7 +56,7 @@ export class TemplateService {
   private watcher: FSWatcher | null = null;
 
   constructor(appConfig: AppConfig) {
-    this.templatesDir = path.resolve(appConfig.templatesDir);
+    this.templatesDir = path.resolve(appConfig.templates_dir);
     this.isDev = appConfig.debug ?? false;
 
     this.hbs = Handlebars.create();

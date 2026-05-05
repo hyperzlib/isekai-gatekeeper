@@ -1,6 +1,6 @@
 import type Koa from "koa";
 import { generateChallenge, verifyChallengeToken, verifyPow } from "../services/challengeService.ts";
-import { issuePowCookie } from "../services/tokenService.ts";
+import { issueChallengePassCookie } from "../services/tokenService.ts";
 import { CaptchaError, CaptchaErrorKind } from "../services/captchaService.ts";
 import type { CaptchaConfig, CaptchaPublicConfig } from "../types/config.ts";
 
@@ -83,7 +83,7 @@ export const verifyPowChallenge = async (ctx: Koa.Context, body: Record<string, 
     return;
   }
 
-  await issuePowCookie(ctx);
+  await issueChallengePassCookie(ctx);
   ctx.body = { success: true };
 }
 
@@ -115,7 +115,7 @@ export const verifyCaptchaChallenge = async (ctx: Koa.Context, body: Record<stri
       return;
     }
 
-    await issuePowCookie(ctx);
+    await issueChallengePassCookie(ctx);
     ctx.body = { success: true };
   } catch (err) {
     if (err instanceof CaptchaError) {

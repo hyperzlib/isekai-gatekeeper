@@ -1,14 +1,13 @@
 import type Koa from "koa";
 import { hmacSha256Hex, timingSafeEqual } from "../lib/crypto.ts";
-import type { AppConfig } from "../types/config.ts";
 
-const COOKIE_NAME = "isekai_pow";
+const COOKIE_NAME = "isekai_gatekeeper_challenge_pass";
 
 /**
- * 签发 PoW Cookie。
+ * 签发验证通过 Cookie。
  * 格式：<unix_ts>.<HMAC-SHA256(unix_ts, secret)>
  */
-export async function issuePowCookie(ctx: Koa.Context): Promise<void> {
+export async function issueChallengePassCookie(ctx: Koa.Context): Promise<void> {
   const ts = Math.floor(Date.now() / 1000).toString();
   const sig = await hmacSha256Hex(ts, ctx.appConfig.browser_challenge.secret);
   const value = `${ts}.${sig}`;
@@ -21,10 +20,10 @@ export async function issuePowCookie(ctx: Koa.Context): Promise<void> {
 }
 
 /**
- * 验证请求中的 PoW Cookie。
+ * 验证请求中的验证通过 Cookie。
  * 检查签名 + 未过期（基于 cookie_ttl）。
  */
-export async function validatePowCookie(
+export async function validateChallengePassCookie(
   ctx: Koa.Context,
 ): Promise<boolean> {
   const raw = ctx.cookies.get(COOKIE_NAME);

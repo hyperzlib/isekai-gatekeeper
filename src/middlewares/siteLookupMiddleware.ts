@@ -1,0 +1,22 @@
+import type Koa from "koa";
+import { Decision } from "../types/decision";
+import { buildCacheKey } from "../services/ruleEngineService";
+
+export const siteLookupMiddleware: Koa.Middleware = async (ctx, next) => {
+  const site = ctx.proxyService.selectSite(ctx);
+  if (!site) {
+    ctx.status = 404;
+    ctx.body = "Site not found";
+    return;
+  }
+  ctx.currentSite = site;
+
+  const decision: Decision = ctx.ruleEngine?.evaluate(ctx) ?? {
+    cache: ctx.appConfig.cache,
+    browser_challenge: ctx.appConfig.browser_challenge,
+    cache_key: buildCacheKey(ctx, ctx.appConfig.cache.cache_key_mode),
+  };
+  ctx.decision = decision;
+
+  return next();
+};

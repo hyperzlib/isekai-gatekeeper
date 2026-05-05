@@ -10,7 +10,8 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "outDir": "./dist"
   },
   "include": ["src", "tests"],
   "exclude": ["node_modules", "dist"]

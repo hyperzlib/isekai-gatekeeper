@@ -1,11 +1,22 @@
 import Koa, { Context } from "koa";
-import type { RuleConfig, SiteConfig, AppConfig, CacheConfig } from "../types/config.ts";
+import type { SiteConfig, AppConfig, CacheConfig } from "../types/config.ts";
+import type { RuleActionCachePolicy, RuleActionReturn, RuleConfig } from "../types/rule.ts";
 import type { Decision, CachePolicy, BrowserChallengePolicy } from "../types/decision.ts";
 import { RulePresets } from "../utils/RulePresets.ts";
 import { IncomingMessage } from "http";
 import { ServerResponse } from "http";
+import { ruleExpressionTools, RuleExpressionTools } from "../utils/RuleTools.ts";
+import { toCloudflareHttp } from "../utils/http.ts";
+import type { CloudflareHttp } from "../types/cloudflare.ts";
 
-type MatcherFunc = (ctx: Context, presets: RulePresets) => boolean;
+type ExpressionGlobal = {
+  ctx: Context;
+  http: CloudflareHttp;
+  presets: RulePresets;
+  state: Record<string, any>;
+} & RuleExpressionTools;
+
+type MatcherFunc = (input: ExpressionGlobal) => boolean;
 
 /** 已编译的规则（条件函数在启动期生成） */
 interface CompiledRule {
@@ -30,11 +41,9 @@ const EXAMPLE_REQUEST = {
   },
 } as const;
 
-/**
- * 允许的条件字段白名单（防止任意代码执行超出限制范围）。
- * 这里采用白名单字段校验：检查 condition 中访问的顶层对象名。
- */
-const ALLOWED_ROOT_VARS = new Set(["http", "presets"]);
+const expressionGlobalKeys = new Set<keyof ExpressionGlobal>([
+  'ctx', 'http', 'presets', 'state'
+]);
 
 function validateConditionSyntax(id: string, condition: string): void {
   // 检查 condition 不含 import/require/fetch/eval/Function 等危险操作
@@ -51,9 +60,8 @@ function compileCondition(app: Koa, id: string, condition: string): MatcherFunc 
   let fn: MatcherFunc;
   try {
     // eslint-disable-next-line no-new-func
-    fn = new Function("ctx", "presets", `"use strict"; return (${condition});`) as (
-      ctx: Context,
-      presets: RulePresets
+    fn = new Function("input", `"use strict"; const { ${Array.from(expressionGlobalKeys).join(", ")} } = input; return (${condition});`) as (
+      input: ExpressionGlobal
     ) => boolean;
   } catch (e) {
     console.log(`Condition compilation error in rule ${id}:`, e);
@@ -81,8 +89,13 @@ function compileCondition(app: Koa, id: string, condition: string): MatcherFunc 
       ...EXAMPLE_REQUEST.headers,
     };
 
-    const presets = new RulePresets(exampleCtx);
-    fn(exampleCtx, presets);
+    fn({
+      ctx: exampleCtx,
+      http: toCloudflareHttp(exampleCtx),
+      presets: new RulePresets(exampleCtx),
+      state: {},
+      ...ruleExpressionTools,
+    });
   } catch (e) {
     if ((e as Error).message.startsWith(`rule=${id}`)) throw e;
     throw new Error(
@@ -96,10 +109,10 @@ function compileCondition(app: Koa, id: string, condition: string): MatcherFunc 
 export class RuleEngineService {
   private debug = false;
   private readonly compiledSites: Map<string, CompiledSite> = new Map();
-  private readonly globalCacheConfig: CacheConfig;
+  private readonly appConfig: AppConfig;
 
   constructor(app: Koa, appConfig: AppConfig) {
-    this.globalCacheConfig = appConfig.cache;
+    this.appConfig = appConfig;
     this.debug = appConfig.debug ?? false;
     for (const [name, site] of Object.entries(appConfig.sites)) {
       const rules = site.rules ?? [];
@@ -128,62 +141,90 @@ export class RuleEngineService {
 
     // 默认决策
     const defaultCachePolicy: CachePolicy = {
-      enabled: this.globalCacheConfig.enabled,
-      ttl: this.globalCacheConfig.ttl,
-      cacheKeyMode: "path+query",
+      enabled: this.appConfig.cache.enabled,
+      ttl: this.appConfig.cache.default_ttl,
+      cacheKeyMode: this.appConfig.cache.cache_key_mode,
     };
-    const defaultChallenge: BrowserChallengePolicy = { enabled: true };
+    const defaultChallenge: BrowserChallengePolicy = {
+      enabled: this.appConfig.browser_challenge.enabled
+    };
 
     if (!entry) {
       return {
-        allow: false,
-        cachePolicy: defaultCachePolicy,
-        browserChallengePolicy: defaultChallenge,
-        cacheKey: buildCacheKey(ctx, "path+query"),
+        block: false,
+        cache: defaultCachePolicy,
+        browser_challenge: defaultChallenge,
+        cache_key: buildCacheKey(ctx, defaultCachePolicy.cacheKeyMode),
       };
     }
 
-    let allow = false;
-    let cacheEnabled = this.globalCacheConfig.enabled;
-    let cacheTtl = this.globalCacheConfig.ttl;
-    let cacheKeyStrategy: "path+query" | "path" = "path+query";
-    let challengeEnabled = true;
+    let isBlocked = false;
+    let returnData: RuleActionReturn | undefined = undefined;
+    let cachePolicy: RuleActionCachePolicy = { ...defaultCachePolicy };
+    let browserChallengePolicy: BrowserChallengePolicy = { ...defaultChallenge };
 
-    for (const rule of entry.rules) {
-      let matches: boolean;
-      try {
-        const presets = new RulePresets(ctx);
-        matches = rule.matcher(ctx, presets);
-      } catch {
-        // 运行期 matcher 失败不影响其他规则
-        continue;
-      }
-      if (!matches) continue;
-
-      if (this.debug) {
-        console.log(`Rule matched: ${rule.raw.id} (${rule.raw.description ?? "no description"})`);
+    if (entry.rules.length > 0) {
+      let expressionGlobal: ExpressionGlobal = {
+        ctx,
+        http: toCloudflareHttp(ctx),
+        presets: new RulePresets(ctx),
+        state: {},
+        ...ruleExpressionTools,
       }
 
-      const actions = rule.raw.actions ?? {};
+      for (const rule of entry.rules) {
+        let matches: boolean;
+        try {
+          matches = rule.matcher(expressionGlobal);
+        } catch {
+          // 运行期 matcher 失败不影响其他规则
+          continue;
+        }
+        if (!matches) continue;
 
-      // 后命中覆盖
-      if (actions.allow !== undefined) allow = actions.allow;
-      if (actions.cache?.enabled !== undefined) cacheEnabled = actions.cache.enabled;
-      if (actions.cache?.ttl !== undefined) cacheTtl = actions.cache.ttl;
-      if (actions.cache?.cacheKeyMode !== undefined) cacheKeyStrategy = actions.cache.cacheKeyMode;
-      if (actions.browser_challenge?.enabled !== undefined)
-        challengeEnabled = actions.browser_challenge.enabled;
+        if (this.debug) {
+          console.log(`Rule matched: ${rule.raw.id} (${rule.raw.description ?? "no description"})`);
+        }
 
-      if (rule.raw.last) break;
+        // block 与 return 都是终止动作
+        if (rule.raw.block || rule.raw.return) {
+          isBlocked = !!rule.raw.block;
+          returnData = rule.raw.return;
+
+          // 禁止缓存和浏览器挑战
+          cachePolicy = { enabled: false, ttl: 1, cache_key_mode: "path" };
+          browserChallengePolicy = { enabled: false };
+
+          break;
+        }
+
+        // 后命中覆盖
+        if (rule.raw.cache) {
+          cachePolicy = {
+            ...cachePolicy,
+            ...rule.raw.cache,
+          }
+        }
+
+        if (rule.raw.browser_challenge) {
+          browserChallengePolicy = {
+            ...browserChallengePolicy,
+            ...rule.raw.browser_challenge,
+          }
+        }
+
+        if (rule.raw.last) break;
+      }
     }
 
-    const cacheKey = buildCacheKey(ctx, cacheKeyStrategy);
+    const cacheKey = buildCacheKey(ctx, cachePolicy.cache_key_mode ?? defaultCachePolicy.cacheKeyMode);
 
     return {
-      allow,
-      cachePolicy: { enabled: cacheEnabled, ttl: cacheTtl, cacheKeyMode: cacheKeyStrategy },
-      browserChallengePolicy: { enabled: challengeEnabled },
-      cacheKey,
+      block: isBlocked,
+      return: returnData,
+      cache: cachePolicy,
+      browser_challenge: browserChallengePolicy,
+      cache_key: cacheKey,
     };
   }
 }

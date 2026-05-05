@@ -12,7 +12,7 @@ export class RulePresets {
     return /Googlebot|MSN|Bingbot|Slurp|DuckDuckBot|Baiduspider|Bytespider|SiteSearch360|360Spider|YisouSpider|Y!J-DLC|Yahoo! Slurp|YandexBot/i.test(ua);
   }
 
-  public async isCommonSearchEngineBotFromIP(): Promise<boolean> {
+  public async isCommonSearchEngineBotIP(): Promise<boolean> {
     if (!this.isCommonSearchEngineBot) return false;
     // 使用反向 DNS 查询
     const ip = this.ctx.ip;

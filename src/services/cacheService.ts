@@ -1,29 +1,57 @@
-import { CacheStore } from "../lib/cacheStore.ts";
-import type { CachedResponse } from "../lib/cacheStore.ts";
-import type { AppConfig } from "../types/config.ts";
+import { MemoryCacheStore } from "../lib/memoryCacheStore.ts";
+import { CachedResponse, ICacheStore } from "../types/cache.ts";
+import type { AppConfig, CacheConfig } from "../types/config.ts";
 
 export type { CachedResponse };
 
 export class CacheService {
-  readonly store: CacheStore;
+  readonly cacheConfig: CacheConfig;
+  private store!: ICacheStore;
 
   constructor(cfg: AppConfig) {
-    this.store = new CacheStore(cfg.cache.max_entries, cfg.cache.max_body_bytes);
+    this.cacheConfig = cfg.cache;
   }
 
-  get(key: string): CachedResponse | null {
-    return this.store.get(key);
+  public async init() {
+    switch (this.cacheConfig.provider) {
+      case "memory":
+        const { MemoryCacheStore } = await import("../lib/memoryCacheStore.ts");
+        this.store = new MemoryCacheStore(
+          this.cacheConfig.max_entries,
+          this.cacheConfig.max_body_bytes,
+          this.cacheConfig.default_ttl
+        );
+        break;
+      case "bunRedis":
+        if (!this.cacheConfig.bun_redis?.url) {
+          throw new Error("Bun Redis cache provider requires cache.bunRedis.url configuration");
+        }
+
+        const { BunRedisCacheStore } = await import("../lib/bunRedisCacheStore.ts");
+        this.store = new BunRedisCacheStore(
+          this.cacheConfig.bun_redis.url,
+          this.cacheConfig.max_body_bytes,
+          this.cacheConfig.default_ttl
+        );
+        break;
+      default:
+        throw new Error(`Unsupported cache provider: ${this.cacheConfig.provider}`);
+    }
   }
 
-  set(key: string, resp: CachedResponse): void {
-    this.store.set(key, resp);
+  public get<T>(key: string): Promise<T | null> {
+    return this.store.get<T>(key);
   }
 
-  delete(key: string): void {
-    this.store.delete(key);
+  public set<T>(key: string, resp: T, ttl?: number): Promise<void> {
+    return this.store.set<T>(key, resp, ttl);
   }
 
-  deleteByPrefix(prefix: string): number {
+  public delete(key: string): Promise<void> {
+    return this.store.delete(key);
+  }
+
+  public deleteByPrefix(prefix: string): Promise<number> {
     return this.store.deleteByPrefix(prefix);
   }
 }

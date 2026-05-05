@@ -11,6 +11,8 @@ import { TemplateService } from "./services/templateService.ts";
 import { GeoIPService } from "./services/geoipService.ts";
 import { ipMiddleware as geoipMiddleware } from "./middlewares/ipMiddleware.ts";
 import { ServiceContainer } from "./types/service.ts";
+import { siteLookupMiddleware } from "./middlewares/siteLookupMiddleware.ts";
+import { reverseProxyMiddleware } from "./middlewares/proxyMiddleware.ts";
 
 /**
  * 构建代理服务器 Koa 应用（处理入站请求 + 挑战路由）。
@@ -50,7 +52,9 @@ export function createProxyApp(
   registerProxyRoutes(app);
 
   // 防火墙 + 反向代理
+  app.use(siteLookupMiddleware);
   app.use(firewallMiddleware);
+  app.use(reverseProxyMiddleware);
 
   return app;
 }

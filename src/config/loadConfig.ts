@@ -4,29 +4,40 @@ import { z } from "zod";
 import type { AppConfig, CaptchaConfig, CaptchaProvider, SiteConfig } from "../types/config.ts";
 import { env } from "./env.ts";
 
-const RuleActionsSchema = z.object({
-  allow: z.boolean().optional(),
-  cache: z
+//#region 规则配置
+const RuleActionReturnSchema = z.object({
+  status: z.number().int().optional(),
+  headers: z.record(z.string()).optional(),
+  text: z.string().optional(),
+  tpl: z
     .object({
-      enabled: z.boolean().optional(),
-      ttl: z.number().int().positive().optional(),
-      cacheKeyMode: z.enum(["path+query", "path"]).optional(),
+      id: z.string().min(1),
+      data: z.record(z.any()).optional(),
     })
     .optional(),
-  browser_challenge: z
-    .object({
-      enabled: z.boolean().optional(),
-    })
-    .optional(),
-}).optional();
+});
+
+const RuleActionCachePolicySchema = z.object({
+  enabled: z.boolean(),
+  ttl: z.number().int().positive().optional(),
+  cache_key_mode: z.enum(["path+query", "path"]).optional(),
+});
+
+const RuleActionBrowserChallengePolicySchema = z.object({
+  enabled: z.boolean(),
+});
 
 const RuleSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
   condition: z.string().min(1),
-  actions: RuleActionsSchema,
   last: z.boolean().optional(),
+  block: z.boolean().optional(),
+  return: RuleActionReturnSchema.optional(),
+  cache: RuleActionCachePolicySchema.optional(),
+  browser_challenge: RuleActionBrowserChallengePolicySchema.optional(),
 });
+//#endregion
 
 const BackendSchema = z.object({
   url: z.string().url(),
@@ -40,6 +51,7 @@ const SiteSchema = z.object({
   rules: z.array(RuleSchema).optional(),
 });
 
+//#region 验证码配置
 const CaptchaProviderSchema = z.enum([
   "recaptcha",
   "hcaptcha",
@@ -98,10 +110,17 @@ const CaptchaSchema = z.object({
   aliyun: AliyunProviderSchema.default({ access_key_id: "", access_key_secret: "" }),
   tencent: TencentProviderSchema.default({ secret_id: "", secret_key: "" }),
 });
+//#endregion
+
+//#region 缓存配置
+const BunRedisConfigSchema = z.object({
+  url: z.string().min(1),
+});
+//#endregion
 
 const AppConfigSchema = z.object({
   debug: z.boolean().optional(),
-  templatesDir: z.string().min(1).optional(),
+  templates_dir: z.string().min(1).optional(),
   proxy: z.object({
     server_port: z.number().int().min(1).max(65535),
   }),
@@ -113,6 +132,7 @@ const AppConfigSchema = z.object({
     enabled: z.boolean(),
     cookie_ttl: z.number().int().positive(),
     challenge_ttl: z.number().int().positive(),
+    tpl: z.string().optional(),
     secret: z.string().min(1),
     pow: z.object({
       difficulty: z.number().int().min(1).max(64),
@@ -120,10 +140,15 @@ const AppConfigSchema = z.object({
   }),
   cache: z.object({
     enabled: z.boolean(),
-    ttl: z.number().int().positive(),
-    cacheKeyMode: z.enum(["path+query", "path"]).default("path+query"),
+    default_ttl: z.number().int().positive(),
+    provider: z.enum(["memory", "bunRedis"]).default("memory"),
+    bun_redis: BunRedisConfigSchema.optional(),
+    cache_key_mode: z.enum(["path+query", "path"]).default("path+query"),
     max_entries: z.number().int().positive(),
     max_body_bytes: z.number().int().positive(),
+    allowed_mimetypes: z.array(z.string()).default([
+      "text/html", "application/json", "text/plain", "text/css", "application/javascript", "text/javascript",
+    ]),
   }),
   captcha: CaptchaSchema.optional(),
   geoip: z.object({
@@ -212,7 +237,7 @@ export function loadConfig(): AppConfig {
 
   return {
     debug: data.debug ?? false,
-    templatesDir: data.templatesDir ?? "./views",
+    templates_dir: data.templates_dir ?? "./views",
     proxy: data.proxy,
     api: data.api,
     browser_challenge: data.browser_challenge,

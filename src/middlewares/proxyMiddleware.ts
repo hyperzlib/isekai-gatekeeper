@@ -15,6 +15,13 @@ export const reverseProxyMiddleware: Koa.Middleware = async (ctx, next) => {
 
   const site = ctx.currentSite;
   const decision = ctx.decision;
+
+  if (ctx.appConfig.cache.bypass_after_challenge && decision.browser_challenge?.enabled) {
+    const isChallengePassed = await ctx.firewallService.validateChallengePassCookie(ctx);
+    if (isChallengePassed) {
+      decision.cache = { enabled: false };
+    }
+  }
   
   await ctx.proxyService.forward(ctx, site, decision);
 };

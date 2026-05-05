@@ -149,6 +149,7 @@ const AppConfigSchema = z.object({
     allowed_mimetypes: z.array(z.string()).default([
       "text/html", "application/json", "text/plain", "text/css", "application/javascript", "text/javascript",
     ]),
+    bypass_after_challenge: z.boolean().default(true),
   }),
   captcha: CaptchaSchema.optional(),
   geoip: z.object({

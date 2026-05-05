@@ -45,6 +45,7 @@ export interface CacheConfig {
   max_entries: number;
   max_body_bytes: number;
   allowed_mimetypes: string[];
+  bypass_after_challenge: boolean;
 }
 
 //#region 验证码配置

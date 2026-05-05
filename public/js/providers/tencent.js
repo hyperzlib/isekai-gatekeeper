@@ -30,6 +30,7 @@ function renderCaptcha(container, appId, onSuccess, onError) {
     const el = document.createElement("div");
     el.id = "tencent-captcha-" + Math.random().toString(36).slice(2, 8);
     container.appendChild(el);
+    setStatus(null);
 
     const captcha = new window.TencentCaptcha(
       el.id,

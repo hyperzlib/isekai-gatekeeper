@@ -27,7 +27,7 @@
       width: 100%;
     }
     h1 { font-size: 1.25rem; margin-bottom: .75rem; }
-    p  { font-size: .9rem; color: #666; margin-bottom: 1.5rem; }
+    p  { font-size: .9rem; color: #666; margin-bottom: 1.2rem; }
     .spinner {
       width: 40px; height: 40px;
       border: 3px solid #e0e0e0;
@@ -38,17 +38,17 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     #status { font-size: .85rem; color: #888; min-height: 1.2em; }
-    #captcha-container { display: none; margin-top: 1.5rem; }
+    #captcha-container { display: none; margin-top: 0.8rem; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="spinner" id="spinner"></div>
     <h1>正在验证您的浏览器</h1>
-    <p>请稍候，这通常只需几秒钟。</p>
+    <p id="challenge-tips">请稍候，这通常只需几秒钟。</p>
     <div id="status">正在准备验证…</div>
 
-    {{#if captchaProvider}}
+    {{#if enableCaptcha}}
     <div id="captcha-container">
       <!-- 验证码 widget 由 provider 脚本动态渲染 -->
     </div>
@@ -57,16 +57,8 @@
 
   <canvas id="c" hidden></canvas>
 
-  <script type="application/json" id="challenge-data">
-    {
-      "challengeApi": "{{challengeApiPath}}",
-      "verifyApi": "{{verifyApiPath}}",
-      "captchaProvider": "{{captchaProvider}}",
-      "captchaSiteKey": "{{captchaSiteKey}}",
-      "captchaGtId": "{{captchaGtId}}",
-      "captchaPublicKey": "{{captchaPublicKey}}",
-      "captchaAppId": "{{captchaAppId}}"
-    }
+  <script type="application/json" id="challenge-config">
+    {{{json challengeConfig}}}
   </script>
   <script src="/.isekai-gatekeeper/public/js/pow.js"></script>
 </body>

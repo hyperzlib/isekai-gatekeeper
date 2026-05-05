@@ -141,7 +141,7 @@ const AppConfigSchema = z.object({
   cache: z.object({
     enabled: z.boolean(),
     default_ttl: z.number().int().positive(),
-    provider: z.enum(["memory", "bunRedis"]).default("memory"),
+    provider: z.enum(["memory", "bun+redis"]).default("memory"),
     bun_redis: BunRedisConfigSchema.optional(),
     cache_key_mode: z.enum(["path+query", "path"]).default("path+query"),
     max_entries: z.number().int().positive(),

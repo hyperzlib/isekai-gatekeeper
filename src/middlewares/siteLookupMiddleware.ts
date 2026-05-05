@@ -1,6 +1,6 @@
 import type Koa from "koa";
 import { Decision } from "../types/decision";
-import { buildCacheKey } from "../services/ruleEngineService";
+import { makePageCacheKey } from "../utils/cache";
 
 export const siteLookupMiddleware: Koa.Middleware = async (ctx, next) => {
   const site = ctx.proxyService.selectSite(ctx);
@@ -9,12 +9,13 @@ export const siteLookupMiddleware: Koa.Middleware = async (ctx, next) => {
     ctx.body = "Site not found";
     return;
   }
-  ctx.currentSite = site;
+  ctx.currentSiteId = site.id;
+  ctx.currentSite = site.config;
 
   const decision: Decision = ctx.ruleEngine?.evaluate(ctx) ?? {
     cache: ctx.appConfig.cache,
     browser_challenge: ctx.appConfig.browser_challenge,
-    cache_key: buildCacheKey(ctx, ctx.appConfig.cache.cache_key_mode),
+    cache_key: makePageCacheKey(ctx.currentSiteId, ctx.URL.pathname, ctx.URL.search, ctx.appConfig.cache.cache_key_mode),
   };
   ctx.decision = decision;
 

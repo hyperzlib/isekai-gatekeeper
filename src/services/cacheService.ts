@@ -13,6 +13,7 @@ export class CacheService {
   }
 
   public async init() {
+    console.log("[cache] Initializing cache service with provider:", this.cacheConfig.provider);
     switch (this.cacheConfig.provider) {
       case "memory":
         const { MemoryCacheStore } = await import("../lib/memoryCacheStore.ts");
@@ -21,10 +22,11 @@ export class CacheService {
           this.cacheConfig.max_body_bytes,
           this.cacheConfig.default_ttl
         );
+        await this.store.init();
         break;
-      case "bunRedis":
+      case "bun+redis":
         if (!this.cacheConfig.bun_redis?.url) {
-          throw new Error("Bun Redis cache provider requires cache.bunRedis.url configuration");
+          throw new Error("Bun Redis cache provider requires cache.bun_redis.url configuration");
         }
 
         const { BunRedisCacheStore } = await import("../lib/bunRedisCacheStore.ts");
@@ -33,6 +35,7 @@ export class CacheService {
           this.cacheConfig.max_body_bytes,
           this.cacheConfig.default_ttl
         );
+        await this.store.init();
         break;
       default:
         throw new Error(`Unsupported cache provider: ${this.cacheConfig.provider}`);

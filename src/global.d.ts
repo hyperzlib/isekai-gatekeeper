@@ -22,6 +22,7 @@ declare module "koa" {
     geoip?: GeoIPInfo;
 
     decision?: Decision;
+    currentSiteId?: string;
     currentSite?: SiteConfig;
   }
 }

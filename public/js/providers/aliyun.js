@@ -46,6 +46,7 @@ function renderCaptcha(container, sceneId, onSuccess, onError) {
       },
     });
     captcha.show();
+    setStatus(null);
   } catch (err) {
     onError && onError(err);
   }

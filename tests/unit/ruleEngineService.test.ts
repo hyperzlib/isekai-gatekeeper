@@ -1,9 +1,10 @@
 import { describe, it, expect } from "bun:test";
 import Koa, { Context } from "koa";
-import { RuleEngineService, buildCacheKey } from "../../src/services/ruleEngineService.ts";
+import { RuleEngineService } from "../../src/services/ruleEngineService.ts";
 import type { AppConfig, SiteConfig } from "../../src/types/config.ts";
 import { IncomingMessage } from "http";
 import { ServerResponse } from "http";
+import { makePageCacheKey, PAGE_CACHE_KEY_PREFIX } from "../../src/utils/cache.ts";
 
 function makeKoaApp(): Koa {
   return new Koa();
@@ -129,7 +130,7 @@ describe("RuleEngineService - evaluate defaults", () => {
     const dec = svc.evaluate(ctx);
     expect(dec.block).toBe(false);
     expect(dec.cache?.enabled).toBe(false);
-    expect(dec.cache_key).toBe("/page");
+    expect(dec.cache_key).toBe(`${PAGE_CACHE_KEY_PREFIX}unknown:/page`);
   });
 
   it("no rules → block=false, inherits global cache/browser_challenge", () => {
@@ -272,7 +273,7 @@ describe("RuleEngineService - cache_key generation", () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([]));
     const dec = svc.evaluate(makeCtx(app, "/page?z=1&a=2"));
-    expect(dec.cache_key).toBe("/page?a=2&z=1");
+    expect(dec.cache_key).toBe(`${PAGE_CACHE_KEY_PREFIX}unknown:/page:?a=2&z=1`);
   });
 
   it("path mode strips query string", () => {
@@ -281,7 +282,7 @@ describe("RuleEngineService - cache_key generation", () => {
       { id: "c1", condition: "true", cache: { enabled: true, cache_key_mode: "path" } },
     ]));
     const dec = svc.evaluate(makeCtx(app, "/page?foo=bar"));
-    expect(dec.cache_key).toBe("/page");
+    expect(dec.cache_key).toBe(`${PAGE_CACHE_KEY_PREFIX}unknown:/page`);
   });
 });
 
@@ -298,14 +299,25 @@ describe("buildCacheKey", () => {
   const app = makeKoaApp();
 
   it("path mode returns only pathname", () => {
-    expect(buildCacheKey(makeSimpleCtx(app, "/foo/bar?x=1"), "path")).toBe("/foo/bar");
+    const ctx = makeSimpleCtx(app, "/foo/bar?x=1");
+    expect(makePageCacheKey("example", ctx.URL.pathname, ctx.URL.search, "path")).toBe(`${PAGE_CACHE_KEY_PREFIX}example:/foo:bar`);
   });
 
-  it("path+query mode returns pathname with sorted query", () => {
-    expect(buildCacheKey(makeSimpleCtx(app, "/foo?c=3&a=1&b=2"), "path+query")).toBe("/foo?a=1&b=2&c=3");
+  it("path+query mode returns pathname with query", () => {
+    const ctx = makeSimpleCtx(app, "/foo?c=3&a=1&b=2");
+    expect(makePageCacheKey("example", ctx.URL.pathname, ctx.URL.search, "path+query")).toBe(`${PAGE_CACHE_KEY_PREFIX}example:/foo:?a=1&b=2&c=3`);
+  });
+
+  it("path+query mode sorts query params alphabetically", () => {
+    const ctx1 = makeSimpleCtx(app, "/foo?z=1&a=2");
+    const ctx2 = makeSimpleCtx(app, "/foo?a=2&z=1");
+    const key1 = makePageCacheKey("example", ctx1.URL.pathname, ctx1.URL.search, "path+query");
+    const key2 = makePageCacheKey("example", ctx2.URL.pathname, ctx2.URL.search, "path+query");
+    expect(key1).toBe(key2);
   });
 
   it("path+query with no query returns just pathname", () => {
-    expect(buildCacheKey(makeSimpleCtx(app, "/foo"), "path+query")).toBe("/foo");
+    const ctx = makeSimpleCtx(app, "/foo");
+    expect(makePageCacheKey("example", ctx.URL.pathname, ctx.URL.search, "path+query")).toBe(`${PAGE_CACHE_KEY_PREFIX}example:/foo`);
   });
 });

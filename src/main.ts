@@ -15,6 +15,8 @@ async function main() {
   console.log("[boot] Config loaded.");
 
   const cacheService = new CacheService(cfg);
+  await cacheService.init();
+  
   const proxyService = new ProxyService(cfg, cacheService);
   const captchaService = new CaptchaService(cfg);
 

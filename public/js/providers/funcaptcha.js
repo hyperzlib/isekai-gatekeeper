@@ -32,6 +32,7 @@ export function mount(container, config, onSuccess, onError) {
 
 function renderWidget(elementId, publicKey, onSuccess, onError) {
   try {
+    setStatus(null);
     window.funPk = publicKey;
     // Arkose uses the funCaptcha global
     if (window.funCaptcha) {

@@ -2,30 +2,38 @@ import type Koa from "koa";
 import { generateChallenge, verifyChallengeToken, verifyPow } from "../services/challengeService.ts";
 import { issueChallengePassCookie } from "../services/tokenService.ts";
 import { CaptchaError, CaptchaErrorKind } from "../services/captchaService.ts";
-import type { CaptchaConfig, CaptchaPublicConfig } from "../types/config.ts";
+import type { CaptchaConfig, FunCaptchaProviderConfig, GeeTestProviderConfig, RecaptchaProviderConfig, TencentProviderConfig } from "../types/config.ts";
+import { CHALLENGE_PATH_PREFIX } from "../routes/challengeRoutes.ts";
 
 /**
  * 从验证码配置提取仅前端必需的公开字段
  */
-export function getCaptchaPublicConfig(captcha: CaptchaConfig | undefined): CaptchaPublicConfig {
+export function getCaptchaPublicConfig(captcha: CaptchaConfig | undefined): Record<string, any> {
   if (!captcha?.type) return { provider: null };
   const provider = captcha[captcha.type];
 
-  const base: CaptchaPublicConfig = { provider: captcha.type };
+  const base: Record<string, any> = {
+    captchaProvider: captcha.type
+  };
+
   switch (captcha.type) {
     case "recaptcha":
+      const recaptchaProvider = provider as RecaptchaProviderConfig;
+      base.siteKey = recaptchaProvider.site_key;
+      base.jsDomain = recaptchaProvider.js_domain ?? "google.com";
+      break;
     case "hcaptcha":
     case "turnstile":
       base.siteKey = (provider as { site_key: string }).site_key;
       break;
     case "geetest":
-      base.gtId = (provider as { id: string }).id;
+      base.gtId = (provider as GeeTestProviderConfig).id;
       break;
     case "funcaptcha":
-      base.publicKey = (provider as { public_key: string }).public_key;
+      base.publicKey = (provider as FunCaptchaProviderConfig).public_key;
       break;
     case "tencent":
-      base.appId = (provider as { secret_id: string }).secret_id;
+      base.appId = (provider as TencentProviderConfig).secret_id;
       break;
     case "aliyun":
       // aliyun 前端不需要额外公钥（通过 scene 初始化）
@@ -44,8 +52,6 @@ export const getChallenge = async (ctx: Koa.Context) => {
 };
 
 export const verifyPowChallenge = async (ctx: Koa.Context, body: Record<string, unknown>) => {
-  
-
   const challenge = body["challenge"];
   const nonce = body["nonce"];
   const token = body["token"];
@@ -165,20 +171,29 @@ export const verifyChallenge = async (ctx: Koa.Context) => {
  * 渲染挑战页面（Handlebars 模板）。
  */
 export const renderChallengePage = (ctx: Koa.Context) => {
-  const redirect = (ctx.query["redirect"] as string | undefined) ?? "/";
+  let redirect = (ctx.query["redirect"] as string | undefined) ?? ".";
+
+  if (redirect === "." && ctx.URL.pathname.startsWith(CHALLENGE_PATH_PREFIX)) {
+    // 如果没有指定 redirect，且当前路径是挑战相关路径，则默认重定向到根路径，避免重定向回挑战页面导致死循环。
+    redirect = "/";
+  }
+
   const publicCfg = getCaptchaPublicConfig(ctx.appConfig.captcha);
 
   ctx.status = 403;
+  
   const template = ctx.tpl.create("challenge");
-  template.assignAll({
-    captchaProvider: publicCfg.provider ?? "",
-    captchaSiteKey: publicCfg.siteKey ?? "",
-    captchaGtId: publicCfg.gtId ?? "",
-    captchaPublicKey: publicCfg.publicKey ?? "",
-    captchaAppId: publicCfg.appId ?? "",
+
+  template.assign('challengeConfig', {
+    challengeApi: "/.isekai-gatekeeper/challenge",
+    verifyApi: "/.isekai-gatekeeper/verify",
+    ...publicCfg,
     redirect,
-    challengeApiPath: "/.isekai-gatekeeper/challenge",
-    verifyApiPath: "/.isekai-gatekeeper/verify",
   });
+  
+  if (publicCfg.captchaProvider) {
+    template.assign('enableCaptcha', true);
+  }
+
   template.flush(ctx);
 };

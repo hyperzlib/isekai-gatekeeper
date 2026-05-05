@@ -8,6 +8,8 @@ import { ServerResponse } from "http";
 import { ruleExpressionTools, RuleExpressionTools } from "../utils/RuleTools.ts";
 import { toCloudflareHttp } from "../utils/http.ts";
 import type { CloudflareHttp } from "../types/cloudflare.ts";
+import { CacheKeyModeType } from "../types/cache.ts";
+import { makePageCacheKey } from "../utils/cache.ts";
 
 type ExpressionGlobal = {
   ctx: Context;
@@ -154,7 +156,7 @@ export class RuleEngineService {
         block: false,
         cache: defaultCachePolicy,
         browser_challenge: defaultChallenge,
-        cache_key: buildCacheKey(ctx, defaultCachePolicy.cacheKeyMode),
+        cache_key: makePageCacheKey(ctx.currentSiteId || "unknown", ctx.URL.pathname, ctx.URL.search, defaultCachePolicy.cacheKeyMode),
       };
     }
 
@@ -192,7 +194,7 @@ export class RuleEngineService {
           returnData = rule.raw.return;
 
           // 禁止缓存和浏览器挑战
-          cachePolicy = { enabled: false, ttl: 1, cache_key_mode: "path" };
+          cachePolicy = { enabled: false, ttl: 1, cache_key_mode: "path" as CacheKeyModeType };
           browserChallengePolicy = { enabled: false };
 
           break;
@@ -217,7 +219,8 @@ export class RuleEngineService {
       }
     }
 
-    const cacheKey = buildCacheKey(ctx, cachePolicy.cache_key_mode ?? defaultCachePolicy.cacheKeyMode);
+    const cacheKey = makePageCacheKey(ctx.currentSiteId || "unknown", ctx.URL.pathname, ctx.URL.search,
+      cachePolicy.cache_key_mode ?? defaultCachePolicy.cacheKeyMode);
 
     return {
       block: isBlocked,
@@ -227,15 +230,4 @@ export class RuleEngineService {
       cache_key: cacheKey,
     };
   }
-}
-
-export function buildCacheKey(ctx: Context, strategy: "path+query" | "path"): string {
-  const path = ctx.request.URL.pathname;
-  if (strategy === "path") return path;
-  const query = ctx.request.URL.search.slice(1);
-  if (!query) return path;
-  // 排序 query 参数保证幂等
-  const sorted = new URLSearchParams(query);
-  sorted.sort();
-  return `${path}?${sorted.toString()}`;
 }

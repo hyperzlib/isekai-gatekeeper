@@ -1,3 +1,4 @@
+import { CacheKeyModeType } from "./cache";
 import { RuleConfig } from "./rule";
 
 /** 站点后端配置 */
@@ -35,11 +36,11 @@ export interface BunRedisConfig {
 /** 全局缓存配置 */
 export interface CacheConfig {
   enabled: boolean;
-  provider: "memory" | "bunRedis";
+  provider: "memory" | "bun+redis";
   bun_redis?: BunRedisConfig;
 
   default_ttl: number;
-  cache_key_mode: "path+query" | "path";
+  cache_key_mode: CacheKeyModeType;
   max_entries: number;
   max_body_bytes: number;
   allowed_mimetypes: string[];
@@ -102,15 +103,6 @@ export interface CaptchaConfig {
   funcaptcha: FunCaptchaProviderConfig;
   aliyun: AliyunProviderConfig;
   tencent: TencentProviderConfig;
-}
-
-/** 暴露给挑战页面的验证码公开配置（不含 secret） */
-export interface CaptchaPublicConfig {
-  provider: CaptchaProvider | null;
-  siteKey?: string;       // recaptcha / hcaptcha / turnstile
-  gtId?: string;           // geetest id
-  publicKey?: string;      // funcaptcha public_key
-  appId?: string;          // tencent secret_id
 }
 //#endregion
 

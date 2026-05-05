@@ -16,12 +16,12 @@ difficulty = 16           # 前导零 bit 数
 
 [cache]
 enabled = true
-provider = "memory"        # 可选 "memory" 或 "bunRedis"
-defaultTTL = 60            # 秒
+provider = "memory"        # 可选 "memory" 或 "bun+redis"
+default_ttl = 60            # 秒
 max_entries = 1000
 max_body_bytes = 1048576  # 1 MiB
 
-[cache.bunRedis]
+[cache.bun_redis]
 url = "redis://localhost:6379"
 
 # ── 验证码 (可选) ──────────────────────────────────────────────────────────

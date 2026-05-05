@@ -1,3 +1,5 @@
+import { CacheKeyModeType } from "./cache";
+
 export interface RuleActionReturn {
   status?: number;
   headers?: Record<string, string>;
@@ -11,7 +13,7 @@ export interface RuleActionReturn {
 export interface RuleActionCachePolicy {
   enabled: boolean;
   ttl?: number;
-  cache_key_mode?: "path+query" | "path";
+  cache_key_mode?: CacheKeyModeType;
 }
 
 export interface RuleActionBrowserChallengePolicy {

@@ -34,6 +34,7 @@ function renderWidget(container, sitekey, onSuccess, onError) {
       "expired-callback": () => onError && onError(new Error("hCaptcha expired")),
       "error-callback": () => onError && onError(new Error("hCaptcha error")),
     });
+    setStatus(null);
   } catch (err) {
     onError && onError(err);
   }

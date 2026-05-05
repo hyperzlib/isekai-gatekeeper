@@ -6,28 +6,44 @@
  * 2. GET challenge API → {challenge, expires, token, difficulty}
  * 3. 检测 WebGL2 软件渲染器 → 回退到验证码
  * 4. WebGL2 片段着色器 SHA-256 并行求解（1M nonce/帧）
- * 5. 求解成功 → POST verify → reload
+ * 5. 求解成功 → POST verify → redirect
  * 6. 超时（30s）或 WebGL2 不可用 → 动态加载验证码 provider
  */
 
-const CONFIG_EL = document.getElementById("challenge-data");
+const CONFIG_EL = document.getElementById("challenge-config");
 const CONFIG = CONFIG_EL ? JSON.parse(CONFIG_EL.textContent) : {};
 const CHALLENGE_API = CONFIG.challengeApi ?? "/.isekai-gatekeeper/challenge";
 const VERIFY_API = CONFIG.verifyApi ?? "/.isekai-gatekeeper/verify";
 const CAPTCHA_PROVIDER = CONFIG.captchaProvider ?? "";
-const CAPTCHA_SITE_KEY = CONFIG.captchaSiteKey ?? "";
-const CAPTCHA_GT_ID = CONFIG.captchaGtId ?? "";
-const CAPTCHA_PUBLIC_KEY = CONFIG.captchaPublicKey ?? "";
-const CAPTCHA_APP_ID = CONFIG.captchaAppId ?? "";
+const REDIRECT_URL = CONFIG.redirect ?? ".";
 const TIMEOUT_MS = 30_000;
 const BATCH_SIZE = 1024; // 1024×1024 = 1M nonce/帧
 
+const challengeTipsEl = document.getElementById("challenge-tips");
 const statusEl = document.getElementById("status");
 const captchaContainer = document.getElementById("captcha-container");
 const spinnerEl = document.getElementById("spinner");
 
+function setChallengeTips(msg) {
+  if (challengeTipsEl) {
+    if (msg) {
+      challengeTipsEl.textContent = msg;
+      challengeTipsEl.style.display = "block";
+    } else {
+      challengeTipsEl.style.display = "none";
+    }
+  }
+}
+
 function setStatus(msg) {
-  if (statusEl) statusEl.textContent = msg;
+  if (statusEl) {
+    if (msg) {
+      statusEl.textContent = msg;
+      statusEl.style.display = "block";
+    } else {
+      statusEl.style.display = "none";
+    }
+  }
 }
 
 /**
@@ -41,6 +57,8 @@ async function showCaptcha() {
 
   if (spinnerEl) spinnerEl.style.display = "none";
   if (captchaContainer) captchaContainer.style.display = "block";
+  setChallengeTips("自动验证失败，请完成验证码验证。");
+  setStatus("正在加载验证码");
 
   const modulePath = `/.isekai-gatekeeper/public/js/providers/${CAPTCHA_PROVIDER}.js`;
 
@@ -50,16 +68,10 @@ async function showCaptcha() {
       throw new Error(`Provider "${CAPTCHA_PROVIDER}" missing mount function`);
     }
 
-    const publicConfig = {
-      siteKey: CAPTCHA_SITE_KEY,
-      gtId: CAPTCHA_GT_ID,
-      publicKey: CAPTCHA_PUBLIC_KEY,
-      appId: CAPTCHA_APP_ID,
-    };
-
+    console.log(captchaContainer);
     mod.mount(
       captchaContainer,
-      publicConfig,
+      CONFIG,
       // onSuccess — 接受 token（字符串）或 { token, extra } 对象
       async (result) => {
         const payload = normalizeCaptchaPayload(result);
@@ -68,11 +80,17 @@ async function showCaptcha() {
       // onError
       (err) => {
         setStatus(`验证码加载失败：${err?.message ?? err}，请刷新重试。`);
+        console.error("Captcha error:", err);
       },
     );
   } catch (err) {
     setStatus(`验证码加载失败：${err?.message ?? err}，请刷新重试。`);
+    console.error("Captcha load error:", err);
   }
+}
+
+function redirectAfterSuccess() {
+  location.href = REDIRECT_URL;
 }
 
 /**
@@ -104,7 +122,7 @@ async function submitCaptcha({ token, extra }) {
       }),
     });
     if (res.ok) {
-      location.reload();
+      redirectAfterSuccess();
     } else {
       const data = await res.json().catch(() => ({}));
       setStatus(`验证失败：${data.error ?? "未知错误"}，请刷新重试。`);
@@ -117,6 +135,10 @@ async function submitCaptcha({ token, extra }) {
 // ── 主流程 ───────────────────────────────────────────────────────────────────
 
 async function main() {
+  // 测试验证码流程
+  showCaptcha();
+  return;
+
   setStatus("正在获取自动验证信息…");
   let challenge, expires, token, difficulty;
   try {
@@ -166,7 +188,7 @@ async function main() {
       }),
     });
     if (res.ok) {
-      location.reload();
+      redirectAfterSuccess();
     } else {
       const data = await res.json().catch(() => ({}));
       setStatus(`自动验证失败：${data.error ?? "未知错误"}`);

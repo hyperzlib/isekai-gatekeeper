@@ -64,7 +64,7 @@ export const recaptchaAdapter: CaptchaProviderAdapter = {
     } catch (err) {
       if (err instanceof CaptchaError) throw err;
       if ((err as Error).name === "AbortError") {
-        throw new CaptchaError("reCAPTCHA request timed out", CaptchaErrorKind.Network);
+        throw new CaptchaError("reCAPTCHA request timed out, domain: " + (config.recaptcha.api_domain ?? "www.google.com"), CaptchaErrorKind.Network);
       }
       throw new CaptchaError(
         `reCAPTCHA network error: ${(err as Error).message}`,

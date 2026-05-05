@@ -31,12 +31,16 @@ function initGeeTest(container, captchaId, onSuccess, onError) {
     window.initGeetest4(
       {
         captchaId,
-        product: "bind",
+        nativeButton: {
+          width: "100%",
+          height: "50px",
+        }
       },
       (instance) => {
         instance.appendTo(container);
         instance.onReady(() => {
           instance.showCaptcha();
+          setStatus(null);
         });
         instance.onSuccess(() => {
           const result = instance.getValidate();

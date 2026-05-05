@@ -21,6 +21,8 @@ export class MemoryCacheStore implements ICacheStore {
     this.defaultTtl = defaultTtl;
   }
 
+  public async init(): Promise<void> { }
+
   public async get<T>(key: string): Promise<T | null> {
     const entry = this.store.get(key);
     if (!entry) return null;

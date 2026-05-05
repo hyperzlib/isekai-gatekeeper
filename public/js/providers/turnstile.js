@@ -37,6 +37,7 @@ function renderWidget(widgetId, sitekey, onSuccess, onError) {
       "expired-callback": () => onError && onError(new Error("Turnstile expired")),
       "error-callback": () => onError && onError(new Error("Turnstile error")),
     });
+    setStatus(null);
   } catch (err) {
     onError && onError(err);
   }

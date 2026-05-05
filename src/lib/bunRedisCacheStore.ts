@@ -12,6 +12,11 @@ export class BunRedisCacheStore implements ICacheStore {
 		this.defaultTtl = defaultTtl;
 	}
 
+	public async init(): Promise<void> {
+		// Test connection
+		await this.client.ping();
+	}
+
 	public async get<T>(key: string): Promise<T | null> {
 		const raw = await this.client.get(key);
 		if (raw == null) return null;

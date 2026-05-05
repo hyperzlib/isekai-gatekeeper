@@ -13,6 +13,14 @@ type PendingCacheEntry = {
   settleReject: (err: unknown) => void;
 };
 
+type PageCacheEntry = {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  cachedAt: number;
+  ttl: number;
+};
+
 /**
  * 渲染后端请求头模板（支持 Handlebars 语法）。
  */
@@ -70,7 +78,11 @@ export class ProxyService {
     }
 
     const status = proxyRes.statusCode ?? 0;
-    const contentType = proxyRes.headers["content-type"] ?? "";
+    let contentType = proxyRes.headers["content-type"] ?? "";
+    if (contentType.includes(";")) {
+      contentType = contentType.split(";")[0]?.trim() ?? "";
+    }
+
     const responseHeaders: Record<string, string> = {};
     for (const [k, v] of Object.entries(proxyRes.headers)) {
       if (v !== undefined) {
@@ -85,13 +97,18 @@ export class ProxyService {
       const body = Buffer.concat(chunks);
 
       if (status === 200 && this.appConfig.cache.allowed_mimetypes.includes(contentType)) {
-        this.cacheService.set(pending.cacheKey, {
-          status,
-          headers: responseHeaders,
-          body: new Uint8Array(body),
-          cachedAt: Date.now(),
-          ttl: pending.ttl,
-        });
+        try {
+          const bodyText = body.toString("utf-8");
+          this.cacheService.set<PageCacheEntry>(pending.cacheKey, {
+            status,
+            headers: responseHeaders,
+            body: bodyText,
+            cachedAt: Date.now(),
+            ttl: pending.ttl,
+          }, pending.ttl);
+        } catch (err) {
+          console.error("Failed to cache response:", err);
+        }
       }
       pending.settleResolve();
     });
@@ -104,10 +121,10 @@ export class ProxyService {
   /**
    * 按 Host 头匹配 site。
    */
-  selectSite(ctx: Koa.Context): SiteConfig | null {
+  selectSite(ctx: Koa.Context): { id: string, config: SiteConfig } | null {
     const host = (ctx.headers["host"] ?? "").split(":")[0] ?? "";
-    for (const site of Object.values(this.appConfig.sites)) {
-      if (site.hostname === host) return site;
+    for (const [siteId, site] of Object.entries(this.appConfig.sites)) {
+      if (site.hostname === host) return { id: siteId, config: site };
     }
     return null;
   }
@@ -121,13 +138,7 @@ export class ProxyService {
 
     // 如果应该缓存，先尝试从缓存中获取
     if (shouldCache) {
-      const cached = await this.cacheService.get<{
-        status: number;
-        headers: Record<string, string>;
-        body: Uint8Array;
-        cachedAt: number;
-        ttl: number;
-      }>(decision.cache_key);
+      const cached = await this.cacheService.get<PageCacheEntry>(decision.cache_key);
 
       if (cached) {
         const now = Date.now();
@@ -136,6 +147,13 @@ export class ProxyService {
           // 缓存未过期，直接返回
           ctx.status = cached.status;
           Object.assign(ctx.headers, cached.headers);
+
+          ctx.set("X-Cache", "HIT");
+          const cacheAge = Math.floor(age / 1000).toString();
+          ctx.set("X-Cache-Age", cacheAge);
+          ctx.set("Age", cacheAge);
+          ctx.set("Expires", new Date(cached.cachedAt + cached.ttl * 1000).toUTCString());
+
           ctx.body = cached.body;
           return;
         }
@@ -187,6 +205,7 @@ export class ProxyService {
         return;
       }
 
+      ctx.set("X-Cache", "MISS");
       ctx.respond = false;
       this.pendingCache.set(req, {
         res,
@@ -198,7 +217,6 @@ export class ProxyService {
 
       this.proxy.web(req, res, { target: site.backend.url }, (err) => {
         this.pendingCache.delete(req);
-        console.log("Proxy error:", err);
         if (!res.headersSent) {
           res.writeHead(502, { "Content-Type": "text/plain" });
           res.end("Bad Gateway");

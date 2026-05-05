@@ -6,6 +6,7 @@
  */
 export function mount(container, config, onSuccess, onError) {
   const sitekey = config.siteKey;
+  const recaptchaDomain = config.jsDomain || "www.google.com";
   if (!sitekey) {
     onError && onError(new Error("reCAPTCHA siteKey is missing"));
     return;
@@ -16,11 +17,14 @@ export function mount(container, config, onSuccess, onError) {
 
   // 加载 reCAPTCHA SDK
   if (!window.grecaptcha) {
+    window.onRecaptchaLoadCallback = () => {
+      renderWidget(container, sitekey, onSuccess, onError);
+    }
+
     const script = document.createElement("script");
-    script.src = "https://www.google.com/recaptcha/api.js";
+    script.src = `https://${recaptchaDomain}/recaptcha/api.js?onload=onRecaptchaLoadCallback&render=explicit`;
     script.async = true;
     script.defer = true;
-    script.onload = () => renderWidget(container, sitekey, onSuccess, onError);
     script.onerror = () => onError && onError(new Error("Failed to load reCAPTCHA SDK"));
     document.head.appendChild(script);
   } else {
@@ -37,6 +41,7 @@ function renderWidget(container, sitekey, onSuccess, onError) {
       "error-callback": () => onError && onError(new Error("reCAPTCHA error")),
     });
     container.dataset.recaptchaWidgetId = widgetId;
+    setStatus(null);
   } catch (err) {
     onError && onError(err);
   }

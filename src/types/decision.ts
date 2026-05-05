@@ -1,13 +1,11 @@
+import { CacheKeyModeType } from "./cache";
 import { RuleAction } from "./rule";
-
-/** 缓存键策略 */
-export type CacheKeyStrategy = "path+query" | "path";
 
 /** 合并后的缓存策略 */
 export interface CachePolicy {
   enabled: boolean;
   ttl: number;
-  cacheKeyMode: CacheKeyStrategy;
+  cacheKeyMode: CacheKeyModeType;
 }
 
 /** 合并后的浏览器挑战策略 */

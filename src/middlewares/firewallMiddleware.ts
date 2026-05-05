@@ -1,8 +1,7 @@
 import type Koa from "koa";
 import { validateChallengePassCookie } from "../services/tokenService.ts";
-import type { Decision, RequestContext } from "../types/decision.ts";
+import type { RequestContext } from "../types/decision.ts";
 import { renderChallengePage } from "../controllers/challengeController.ts";
-import { buildCacheKey } from "../services/ruleEngineService.ts";
 import { CHALLENGE_PATH_PREFIX } from "../routes/challengeRoutes.ts";
 import { RuleActionReturn } from "../types/rule.ts";
 

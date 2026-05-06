@@ -209,4 +209,3 @@ export function toCloudflareHttp(ctx: Context): CloudflareHttp {
 		request: request as CloudflareHttp["request"],
 	};
 }
-

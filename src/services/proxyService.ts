@@ -30,7 +30,7 @@ function nodeStreamToReadableStream(nodeStream: Readable): ReadableStream<Uint8A
 
 type PageCacheEntry = {
   status: number;
-  headers: Record<string, string>;
+  headers: Record<string, string[]>;
   body: string;
   cachedAt: number;
   ttl: number;
@@ -198,17 +198,23 @@ export class ProxyService {
 
     // 复制状态码和响应头到 client
     ctx.status = resp.status;
-    const responseHeaders: Record<string, string> = {};
+    const responseHeaders: Record<string, string[]> = {};
     const responseHopByHop = new Set([
       "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
       "te", "trailers", "transfer-encoding", "upgrade", "content-encoding", "content-length",
     ]);
     resp.headers.forEach((value, key) => {
-      if (!responseHopByHop.has(key.toLowerCase())) {
-        responseHeaders[key] = value;
-        ctx.set(key, value);
+      const lowerKey = key.toLowerCase();
+      if (!responseHopByHop.has(lowerKey)) {
+        if (!Array.isArray(responseHeaders[lowerKey])) {
+          responseHeaders[lowerKey] = [];
+        }
+        responseHeaders[lowerKey].push(value);
       }
     });
+    for (const [k, v] of Object.entries(responseHeaders)) {
+      ctx.set(k, v);
+    }
 
     // 缓存逻辑
     if (shouldCache && resp.body) {
@@ -217,8 +223,11 @@ export class ProxyService {
         contentType = contentType.split(";")[0]?.trim() ?? "";
       }
 
+      ctx.set("X-Cache", "MISS");
+      
       const allowedStatuses = [200, 301, 308];
       if (allowedStatuses.includes(resp.status) && this.appConfig.cache.allowed_mimetypes.includes(contentType)) {
+        ctx.set("X-Cache-Reason", "MISS_CACHEABLE");
         try {
           const chunks: Buffer[] = [];
           const reader = resp.body.getReader();
@@ -230,14 +239,14 @@ export class ProxyService {
           const rawBody: Buffer = Buffer.concat(chunks);
 
           // 解压缩
-          const contentEncoding = (responseHeaders["content-encoding"] ?? "").toLowerCase().trim();
+          const contentEncoding = (responseHeaders["content-encoding"]?.[0] ?? "").toLowerCase().trim();
           let bodyBuffer = rawBody;
           const cachedHeaders = { ...responseHeaders };
           if (contentEncoding) {
             try {
               bodyBuffer = decodeContentEncoding(rawBody, contentEncoding);
               delete cachedHeaders["content-encoding"];
-              cachedHeaders["content-length"] = String(bodyBuffer.length);
+              cachedHeaders["content-length"] = [String(bodyBuffer.length)];
             } catch {
               // 解压失败，保留原始数据
             }
@@ -261,12 +270,13 @@ export class ProxyService {
         } catch (err) {
           console.error("[ProxyService] Failed to cache response:", err);
         }
+      } else {
+        ctx.set("X-Cache-Reason", "UNCACHEABLE");
       }
     }
 
     // 非缓存路径：直接将 fetch 的 body stream pipe 到 Koa response
     if (resp.body) {
-      ctx.set("X-Cache", "MISS");
       // 将 Web ReadableStream 转为 Node.js Readable 并设置到 body
       ctx.body = Readable.from(
         (async function* () {

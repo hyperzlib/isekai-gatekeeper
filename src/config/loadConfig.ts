@@ -3,6 +3,7 @@ import { parse as parseTOML } from "smol-toml";
 import { z } from "zod";
 import type { AppConfig, CaptchaConfig, CaptchaProvider, SiteConfig } from "../types/config.ts";
 import { env } from "./env.ts";
+import Handlebars from "handlebars";
 
 //#region 规则配置
 const RuleActionReturnSchema = z.object({

@@ -156,7 +156,8 @@ export class ProxyService {
     }
 
     // 请求体转发：multipart（文件上传）→ 流式转发；JSON/form → 字符串化
-    const contentType = (ctx.request.type ?? ctx.headers["content-type"] ?? "").toLowerCase();
+    const rawContentTypeHeader = typeof ctx.headers["content-type"] === "string" ? ctx.headers["content-type"] : "";
+    const contentType = (ctx.request.type ?? rawContentTypeHeader ?? "").toLowerCase();
     const isMultipart = contentType.startsWith("multipart/form-data");
     const isStreamableBody = ctx.method !== "GET" && ctx.method !== "HEAD";
 
@@ -164,12 +165,15 @@ export class ProxyService {
     if (isStreamableBody) {
       if (isMultipart) {
         // 文件上传：直接透传原始流
-        forwardHeaders["content-type"] = contentType;
+        if (rawContentTypeHeader) {
+          // multipart/form-data 需要保留 boundary 参数，否则上游无法解析。
+          forwardHeaders["content-type"] = rawContentTypeHeader;
+        }
         body = nodeStreamToReadableStream(ctx.req);
       } else if (ctx.request.body && ctx.request.rawBody) {
         // 文本类型的 body（如 JSON、表单）
         body = ctx.request.rawBody;
-        forwardHeaders["content-type"] = ctx.request.type || "application/json";
+        forwardHeaders["content-type"] = contentType || "application/json";
       } else {
         // 未知的流式 body（如 application/octet-stream）
         forwardHeaders["content-type"] = contentType || "application/octet-stream";

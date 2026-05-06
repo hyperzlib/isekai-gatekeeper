@@ -5,6 +5,29 @@ import type { AppConfig, SiteConfig } from "../types/config.ts";
 import type { CacheService } from "./cacheService.ts";
 import type { Decision } from "../types/decision.ts";
 
+/**
+ * 将 Node.js Readable stream 转为 Web ReadableStream，
+ * 用于透传文件上传等流式请求体到 fetch。
+ */
+function nodeStreamToReadableStream(nodeStream: Readable): ReadableStream<Uint8Array> {
+  if (nodeStream.readableFlowing) {
+    // 已被消费为 flowing 模式，用 Readable.toWeb 直接转换
+    return Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
+  }
+  return new ReadableStream({
+    start(controller) {
+      nodeStream.on("data", (chunk: Buffer) => {
+        controller.enqueue(chunk);
+      });
+      nodeStream.on("end", () => controller.close());
+      nodeStream.on("error", (err) => controller.error(err));
+    },
+    cancel() {
+      nodeStream.destroy();
+    },
+  });
+}
+
 type PageCacheEntry = {
   status: number;
   headers: Record<string, string>;
@@ -132,11 +155,26 @@ export class ProxyService {
       Object.assign(forwardHeaders, renderHeaders(site.backend.headers, ctx));
     }
 
-    // 可选的流式请求体
-    let body: any | undefined;
-    if (ctx.request.body && ctx.method !== "GET" && ctx.method !== "HEAD") {
-      body = JSON.stringify(ctx.request.body);
-      forwardHeaders["content-type"] = ctx.request.type || forwardHeaders["content-type"] || "application/json";
+    // 请求体转发：multipart（文件上传）→ 流式转发；JSON/form → 字符串化
+    const contentType = (ctx.request.type ?? ctx.headers["content-type"] ?? "").toLowerCase();
+    const isMultipart = contentType.startsWith("multipart/form-data");
+    const isStreamableBody = ctx.method !== "GET" && ctx.method !== "HEAD";
+
+    let body: string | ReadableStream<Uint8Array> | undefined;
+    if (isStreamableBody) {
+      if (isMultipart) {
+        // 文件上传：直接透传原始流
+        forwardHeaders["content-type"] = contentType;
+        body = nodeStreamToReadableStream(ctx.req);
+      } else if (ctx.request.body && ctx.request.rawBody) {
+        // 文本类型的 body（如 JSON、表单）
+        body = ctx.request.rawBody;
+        forwardHeaders["content-type"] = ctx.request.type || "application/json";
+      } else {
+        // 未知的流式 body（如 application/octet-stream）
+        forwardHeaders["content-type"] = contentType || "application/octet-stream";
+        body = nodeStreamToReadableStream(ctx.req);
+      }
     }
 
     let resp: Response;

@@ -40,7 +40,6 @@ export function createProxyApp(
   });
 
   app.use(errorMiddleware);
-  app.use(bodyParser());
 
   app.use(geoipMiddleware);
 

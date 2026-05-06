@@ -2,11 +2,15 @@ import Router from "@koa/router";
 import serve from "koa-static";
 import { getChallenge, verifyChallenge, renderChallengePage } from "../controllers/challengeController.ts";
 import mount from "koa-mount";
+import { bodyParser } from "@koa/bodyparser";
 
 export const CHALLENGE_PATH_PREFIX = "/.isekai-gatekeeper";
 
 export function createChallengeRouter(): Router {
   const router = new Router({ prefix: CHALLENGE_PATH_PREFIX });
+
+  // 部分路由需要 bodyparser
+  router.use(bodyParser());
 
   router.get("/challenge", getChallenge);
   router.post("/verify", verifyChallenge);

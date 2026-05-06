@@ -4,6 +4,8 @@ export interface CloudflareHttpUri {
 	/** path + query（不含协议与 host） */
 	raw: string;
 	path: string;
+	/** 经过 urldecode 后的path */
+	path_decoded: string;
 	/** 不带前导 ?，保留原始编码 */
 	query: string;
 	path_extension: string;

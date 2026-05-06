@@ -148,6 +148,7 @@ export function toCloudflareHttp(ctx: Context): CloudflareHttp {
 		{
 			raw: fullUri,
 			path: url.pathname,
+			path_decoded: decodeURIComponent(url.pathname),
 			query,
 			path_extension: "",
 			args: {},

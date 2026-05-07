@@ -13,10 +13,10 @@ import { reverseProxyMiddleware } from "./middlewares/proxyMiddleware.ts";
 /**
  * 构建代理服务器 Koa 应用（处理入站请求 + 挑战路由）。
  */
-export function createProxyApp(
+export async function createProxyApp(
   cfg: AppConfig,
   services: ServiceContainer,
-): Koa {
+): Promise<Koa> {
   const app = new Koa();
 
   app.proxy = true; // 启用代理信任，正确获取客户端 IP 等信息
@@ -25,11 +25,13 @@ export function createProxyApp(
 
   // 加载规则引擎
   const ruleEngine = new RuleEngineService(app, cfg);
+  await ruleEngine.init();
   console.log("[boot] Rules compiled successfully.");
   app.context.ruleEngine = ruleEngine;
 
   app.context.cacheService = services.cacheService;
   app.context.captchaService = services.captchaService;
+  app.context.rateLimitService = services.rateLimitService;
   app.context.proxyService = services.proxyService;
   app.context.tpl = services.tpl;
   app.context.geoipService = services.geoipService;
@@ -57,16 +59,17 @@ export function createProxyApp(
 /**
  * 构建 API 服务器 Koa 应用（缓存管理等）。
  */
-export function createApiApp(
+export async function createApiApp(
   cfg: AppConfig,
   services: ServiceContainer,
-): Koa {
+): Promise<Koa> {
   const app = new Koa();
 
   app.context.appConfig = cfg;
 
   app.context.cacheService = services.cacheService;
   app.context.captchaService = services.captchaService;
+  app.context.rateLimitService = services.rateLimitService;
   app.context.proxyService = services.proxyService;
   app.context.tpl = services.tpl;
   app.context.geoipService = services.geoipService;

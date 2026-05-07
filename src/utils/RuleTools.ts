@@ -15,7 +15,7 @@ export const ruleExpressionTools = {
     } else {
       return pattern.test(str);
     }
-  }
+  },
 }
 
 export type RuleExpressionTools = typeof ruleExpressionTools;

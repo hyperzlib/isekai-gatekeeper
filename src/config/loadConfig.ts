@@ -26,17 +26,20 @@ const RuleActionCachePolicySchema = z.object({
 
 const RuleActionBrowserChallengePolicySchema = z.object({
   enabled: z.boolean(),
+  re_challenge: z.boolean().optional(),
 });
 
 const RuleSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
   condition: z.string().min(1),
+  skip_test: z.boolean().optional(),
   last: z.boolean().optional(),
   block: z.boolean().optional(),
   return: RuleActionReturnSchema.optional(),
   cache: RuleActionCachePolicySchema.optional(),
   browser_challenge: RuleActionBrowserChallengePolicySchema.optional(),
+  exec: z.string().optional(),
 });
 //#endregion
 

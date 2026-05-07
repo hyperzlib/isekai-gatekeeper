@@ -1,45 +1,8 @@
 import type Koa from "koa";
-import { validateChallengePassCookie } from "../services/tokenService.ts";
-import type { RequestContext } from "../types/decision.ts";
+import { clearChallengePassCookie } from "../services/tokenService.ts";
 import { renderChallengePage } from "../controllers/challengeController.ts";
 import { CHALLENGE_PATH_PREFIX } from "../routes/challengeRoutes.ts";
 import { RuleActionReturn } from "../types/rule.ts";
-
-/**
- * 从 Koa Context 构建规则引擎所需的 RequestContext。
- */
-function buildRequestContext(ctx: Koa.Context): RequestContext {
-  const url = new URL(ctx.url, `http://${ctx.host}`);
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(ctx.headers)) {
-    if (v !== undefined) headers[k] = Array.isArray(v) ? v.join(", ") : v;
-  }
-  const cookies: Record<string, string> = {};
-  // 解析 Cookie 头
-  const rawCookie = ctx.headers["cookie"] ?? "";
-  for (const part of rawCookie.split(";")) {
-    const eqIdx = part.indexOf("=");
-    if (eqIdx === -1) continue;
-    const name = part.slice(0, eqIdx).trim();
-    const value = part.slice(eqIdx + 1).trim();
-    cookies[name] = value;
-  }
-
-  return {
-    http: {
-      request: {
-        uri: {
-          path: url.pathname,
-          query: url.search.slice(1),
-        },
-        origin: ctx.headers["origin"] ?? `${ctx.protocol}://${ctx.host}`,
-        headers,
-        cookies,
-        method: ctx.method,
-      },
-    },
-  };
-}
 
 export const handleReturnAction = (ctx: Koa.Context, returnData: RuleActionReturn) => {
   ctx.status = returnData.status ?? 200;
@@ -95,9 +58,12 @@ export const firewallMiddleware: Koa.Middleware = async (ctx, next) => {
 
   // 浏览器挑战
   if (decision.browser_challenge?.enabled) {
-    const isChallengePassed = await validateChallengePassCookie(ctx);
-    if (!isChallengePassed) {
-      // 显示挑战页面
+    if (!ctx.validatedClientId || decision.browser_challenge.re_challenge) {
+      if (decision.browser_challenge.re_challenge) {
+        // 清除验证通过的 Cookie（如果有），强制重新挑战
+        clearChallengePassCookie(ctx);
+      }
+      // 如果 validatedClientId 为null，说明未通过检测，显示挑战页面
       renderChallengePage(ctx);
       return;
     }

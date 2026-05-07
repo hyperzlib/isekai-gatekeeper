@@ -10,20 +10,26 @@ import { toCloudflareHttp } from "../utils/http.ts";
 import type { CloudflareHttp } from "../types/cloudflare.ts";
 import { CacheKeyModeType } from "../types/cache.ts";
 import { makePageCacheKey } from "../utils/cache.ts";
+import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
+
+const AsyncFunction = Object.getPrototypeOf(async function () { }).constructor;
 
 type ExpressionGlobal = {
   ctx: Context;
   http: CloudflareHttp;
   presets: RulePresets;
+  rateLimit: RuleRateLimit;
   state: Record<string, any>;
 } & RuleExpressionTools;
 
-type MatcherFunc = (input: ExpressionGlobal) => boolean;
+type MatcherFunc = (input: ExpressionGlobal) => Promise<boolean>;
+type ExecFunc = (input: ExpressionGlobal) => Promise<void>;
 
 /** 已编译的规则（条件函数在启动期生成） */
 interface CompiledRule {
   raw: RuleConfig;
   matcher: MatcherFunc;
+  exec?: ExecFunc;
 }
 
 /** 每个 site 的已编译规则集 */
@@ -44,7 +50,7 @@ const EXAMPLE_REQUEST = {
 } as const;
 
 let expressionGlobalKeys = new Set<keyof ExpressionGlobal>([
-  'ctx', 'http', 'presets', 'state',
+  'ctx', 'http', 'presets', 'rateLimit', 'state',
   ...Object.keys(ruleExpressionTools) as (keyof RuleExpressionTools)[]
 ]);
 
@@ -58,14 +64,14 @@ function validateConditionSyntax(id: string, condition: string): void {
   }
 }
 
-function compileCondition(app: Koa, id: string, condition: string): MatcherFunc {
+async function compileCondition(app: Koa, id: string, condition: string): Promise<MatcherFunc> {
   validateConditionSyntax(id, condition);
   let fn: MatcherFunc;
   try {
     // eslint-disable-next-line no-new-func
-    fn = new Function("input", `"use strict"; const { ${Array.from(expressionGlobalKeys).join(", ")} } = input; return (${condition});`) as (
+    fn = new AsyncFunction("input", `"use strict"; const { ${Array.from(expressionGlobalKeys).join(", ")} } = input; return (${condition});`) as (
       input: ExpressionGlobal
-    ) => boolean;
+    ) => Promise<boolean>;
   } catch (e) {
     console.log(`Condition compilation error in rule ${id}:`, e);
     console.log("Condition source:", condition);
@@ -92,10 +98,11 @@ function compileCondition(app: Koa, id: string, condition: string): MatcherFunc 
       ...EXAMPLE_REQUEST.headers,
     };
 
-    fn({
+    await fn({
       ctx: exampleCtx,
       http: toCloudflareHttp(exampleCtx),
       presets: new RulePresets(exampleCtx),
+      rateLimit: new RuleRateLimit(exampleCtx),
       state: {},
       ...ruleExpressionTools,
     });
@@ -109,20 +116,75 @@ function compileCondition(app: Koa, id: string, condition: string): MatcherFunc 
   return fn
 }
 
+async function compileExec(app: Koa, id: string, exec: string): Promise<ExecFunc> {
+  validateConditionSyntax(id, exec);
+  let fn: ExecFunc; try {
+    // eslint-disable-next-line no-new-func
+    fn = new AsyncFunction("input", `"use strict"; const { ${Array.from(expressionGlobalKeys).join(", ")} } = input; ${exec};`) as ExecFunc;
+  } catch (e) {
+    console.log(`Exec compilation error in rule ${id}:`, e);
+    console.log("Exec source:", exec);
+    throw new Error(
+      `rule=${id} field=exec message=Syntax error: ${(e as Error).message}`,
+    );
+  }
+
+  // 用示例数据测试执行
+  try {
+    const exampleRequest: IncomingMessage = new IncomingMessage(null as unknown as any);
+    exampleRequest.method = EXAMPLE_REQUEST.method;
+    exampleRequest.url = EXAMPLE_REQUEST.url;
+    exampleRequest.headers = {};
+    exampleRequest.httpVersion = "1.1";
+    for (const [key, value] of Object.entries(EXAMPLE_REQUEST.headers)) {
+      exampleRequest.headers[key] = value;
+    }
+
+    const exampleResponse: ServerResponse = new ServerResponse(exampleRequest);
+    const exampleCtx = app.createContext(exampleRequest, exampleResponse);
+    exampleCtx.request.header = {
+      ...exampleCtx.request.header,
+      ...EXAMPLE_REQUEST.headers,
+    };
+
+    await fn({
+      ctx: exampleCtx,
+      http: toCloudflareHttp(exampleCtx),
+      presets: new RulePresets(exampleCtx),
+      rateLimit: new RuleRateLimit(exampleCtx),
+      state: {},
+      ...ruleExpressionTools,
+    });
+  } catch (e) {
+    if ((e as Error).message.startsWith(`rule=${id}`)) throw e;
+    throw new Error(
+      `rule=${id} field=exec message=Runtime error during test: ${(e as Error).message}`,
+    );
+  }
+
+  return fn
+}
+
 export class RuleEngineService {
   private debug = false;
   private readonly compiledSites: Map<string, CompiledSite> = new Map();
+  private readonly app: Koa;
   private readonly appConfig: AppConfig;
 
   constructor(app: Koa, appConfig: AppConfig) {
+    this.app = app;
     this.appConfig = appConfig;
     this.debug = appConfig.debug ?? false;
-    for (const [name, site] of Object.entries(appConfig.sites)) {
+  }
+
+  async init() {
+    for (const [name, site] of Object.entries(this.appConfig.sites)) {
       const rules = site.rules ?? [];
-      const compiled: CompiledRule[] = rules.map((rule) => ({
+      const compiled: CompiledRule[] = await Promise.all(rules.map(async (rule) => ({
         raw: rule,
-        matcher: compileCondition(app, rule.id, rule.condition),
-      }));
+        matcher: await compileCondition(this.app, rule.id, rule.condition),
+        exec: rule.exec ? await compileExec(this.app, rule.id, rule.exec) : undefined,
+      })));
       if (Array.isArray(site.hostname)) {
         for (const hostname of site.hostname) {
           this.compiledSites.set(hostname, { rules: compiled, siteConfig: site });
@@ -144,7 +206,7 @@ export class RuleEngineService {
   /**
    * 对请求上下文执行 multi-match 规则评估，返回合并决策。
    */
-  evaluate(ctx: Context): Decision {
+  async evaluate(ctx: Context): Promise<Decision> {
     const hostname = ctx.request.headers["host"] ?? "";
     const entry = this.compiledSites.get(hostname);
 
@@ -173,18 +235,20 @@ export class RuleEngineService {
     let browserChallengePolicy: BrowserChallengePolicy = { ...defaultChallenge };
 
     if (entry.rules.length > 0) {
+      ctx.state.ruleEngineState ??= {};
       let expressionGlobal: ExpressionGlobal = {
         ctx,
         http: toCloudflareHttp(ctx),
         presets: new RulePresets(ctx),
-        state: {},
+        rateLimit: new RuleRateLimit(ctx),
+        state: ctx.state.ruleEngineState,
         ...ruleExpressionTools,
       }
 
       for (const rule of entry.rules) {
         let matches: boolean;
         try {
-          matches = rule.matcher(expressionGlobal);
+          matches = await rule.matcher(expressionGlobal);
         } catch {
           // 运行期 matcher 失败不影响其他规则
           continue;
@@ -193,6 +257,14 @@ export class RuleEngineService {
 
         if (this.debug) {
           console.log(`Rule matched: ${rule.raw.id} (${rule.raw.description ?? "no description"})`);
+        }
+
+        if (rule.exec) {
+          try {
+            await rule.exec(expressionGlobal);
+          } catch (e) {
+            console.log(`Error executing custom script in rule ${rule.raw.id}:`, e);
+          }
         }
 
         // block 与 return 都是终止动作

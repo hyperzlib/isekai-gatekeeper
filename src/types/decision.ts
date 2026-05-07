@@ -14,7 +14,7 @@ export interface BrowserChallengePolicy {
 }
 
 /** 规则引擎的合并决策结果 */
-export type Decision = RuleAction & {
+export type Decision = Omit<RuleAction, 'exec'> & {
   /** 根据 cachePolicy.key 计算得出的实际缓存键 */
   cache_key: string;
 }

@@ -8,6 +8,7 @@ import { TemplateService } from "./services/templateService.ts";
 import { GeoIPService } from "./services/geoipService.ts";
 import { CaptchaService } from "./services/captchaService.ts";
 import { ServiceContainer } from "./types/service.ts";
+import { RateLimitService } from "./services/rateLimitService.ts";
 
 async function main() {
   const cfg = loadConfig();
@@ -20,6 +21,8 @@ async function main() {
   const proxyService = new ProxyService(cfg, cacheService);
   const captchaService = new CaptchaService(cfg);
 
+  const rateLimitService = new RateLimitService(cacheService);
+
   const templateService = new TemplateService(cfg);
   await templateService.init();
 
@@ -29,19 +32,20 @@ async function main() {
   const serviceContainer: ServiceContainer = {
     cacheService,
     captchaService,
+    rateLimitService,
     proxyService,
     tpl: templateService,
     geoipService,
   };
 
   // 代理服务器
-  const proxyApp = createProxyApp(cfg, serviceContainer);
+  const proxyApp = await createProxyApp(cfg, serviceContainer);
   const proxyServer = proxyApp.listen(cfg.proxy.server_port, () => {
     console.log(`[proxy] Listening on port ${cfg.proxy.server_port}`);
   });
 
   // API 服务器
-  const apiApp = createApiApp(cfg, serviceContainer);
+  const apiApp = await createApiApp(cfg, serviceContainer);
   const apiServer = apiApp.listen(cfg.api.server_port, () => {
     console.log(`[api] Listening on port ${cfg.api.server_port}`);
   });

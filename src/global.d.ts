@@ -2,6 +2,7 @@ import koa, { DefaultContext } from "koa";
 import { CacheService } from "./services/cacheService";
 import { CaptchaService } from "./services/captchaService";
 import { ProxyService } from "./services/proxyService";
+import { RateLimitService } from "./services/rateLimitService";
 import { RuleEngineService } from "./services/ruleEngineService";
 import { AppConfig } from "./types/config";
 import { TemplateService } from "./services/templateService";
@@ -14,6 +15,7 @@ declare module "koa" {
     cacheService: CacheService;
     captchaService: CaptchaService;
     proxyService: ProxyService;
+    rateLimitService: RateLimitService;
     appConfig: AppConfig;
     tpl: TemplateService;
     geoipService: GeoIPService;
@@ -24,5 +26,7 @@ declare module "koa" {
     decision?: Decision;
     currentSiteId?: string;
     currentSite?: SiteConfig;
+
+    validatedClientId?: string | null;
   }
 }

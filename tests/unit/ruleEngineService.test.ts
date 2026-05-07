@@ -67,35 +67,39 @@ describe("RuleEngineService - compilation", () => {
     ).not.toThrow();
   });
 
-  it("throws on forbidden identifier (eval)", () => {
+  it("throws on forbidden identifier (eval)", async () => {
+    const svc = new RuleEngineService(makeKoaApp(), makeConfig([
+      { id: "r1", condition: "eval('1+1') === 2" },
+    ]));
     expect(
-      () => new RuleEngineService(makeKoaApp(), makeConfig([
-        { id: "r1", condition: "eval('1+1') === 2" },
-      ])),
+      async () => await svc.init(),
     ).toThrow(/rule=r1/);
   });
 
-  it("throws on forbidden identifier (fetch)", () => {
+  it("throws on forbidden identifier (fetch)", async () => {
+    const svc = new RuleEngineService(makeKoaApp(), makeConfig([
+      { id: "r2", condition: "fetch('/api') !== null" },
+    ]));
     expect(
-      () => new RuleEngineService(makeKoaApp(), makeConfig([
-        { id: "r2", condition: "fetch('/api') !== null" },
-      ])),
+      async () => await svc.init(),
     ).toThrow(/rule=r2/);
   });
 
-  it("throws on syntax error in condition", () => {
+  it("throws on syntax error in condition", async () => {
+    const svc = new RuleEngineService(makeKoaApp(), makeConfig([
+      { id: "bad", condition: "((( invalid syntax" },
+    ]));
     expect(
-      () => new RuleEngineService(makeKoaApp(), makeConfig([
-        { id: "bad", condition: "((( invalid syntax" },
-      ])),
+      async () => await svc.init(),
     ).toThrow(/rule=bad/);
   });
 
-  it("throws on runtime error during dry-run with example request", () => {
+  it("throws on runtime error during dry-run with example request", async () => {
+    const svc = new RuleEngineService(makeKoaApp(), makeConfig([
+      { id: "boom", condition: "ctx.request.nonExistentMethod()" },
+    ]));
     expect(
-      () => new RuleEngineService(makeKoaApp(), makeConfig([
-        { id: "boom", condition: "ctx.request.nonExistentMethod()" },
-      ])),
+      async () => await svc.init(),
     ).toThrow(/rule=boom/);
   });
 });
@@ -103,17 +107,19 @@ describe("RuleEngineService - compilation", () => {
 // ─── getSiteByHostname ───────────────────────────────────────────────────────
 
 describe("RuleEngineService - getSiteByHostname", () => {
-  it("returns site config for known hostname", () => {
+  it("returns site config for known hostname", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([]));
+    await svc.init();
     const site = svc.getSiteByHostname("test.com");
     expect(site).not.toBeNull();
     expect(site!.hostname).toBe("test.com");
   });
 
-  it("returns null for unknown hostname", () => {
+  it("returns null for unknown hostname", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([]));
+    await svc.init();
     expect(svc.getSiteByHostname("other.com")).toBeNull();
   });
 });
@@ -121,23 +127,25 @@ describe("RuleEngineService - getSiteByHostname", () => {
 // ─── evaluate：默认行为 ───────────────────────────────────────────────────────
 
 describe("RuleEngineService - evaluate defaults", () => {
-  it("no site match → block=false, cache from global config, cache_key set", () => {
+  it("no site match → block=false, cache from global config, cache_key set", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([]));
+    await svc.init();
     const req = new IncomingMessage(null as any);
     req.url = "/page";
     req.headers = { host: "unknown.com" };
     const ctx = app.createContext(req, new ServerResponse(req));
-    const dec = svc.evaluate(ctx);
+    const dec = await svc.evaluate(ctx);
     expect(dec.block).toBe(false);
     expect(dec.cache?.enabled).toBe(false);
     expect(dec.cache_key).toBe(`${PAGE_CACHE_KEY_PREFIX}unknown:/page`);
   });
 
-  it("no rules → block=false, inherits global cache/browser_challenge", () => {
+  it("no rules → block=false, inherits global cache/browser_challenge", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([], { cacheEnabled: true }));
-    const dec = svc.evaluate(makeCtx(app, "/anything"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/anything"));
     expect(dec.block).toBe(false);
     expect(dec.cache?.enabled).toBe(true);
     expect(dec.browser_challenge?.enabled).toBe(true);
@@ -147,26 +155,28 @@ describe("RuleEngineService - evaluate defaults", () => {
 // ─── evaluate：block / return ─────────────────────────────────────────────────
 
 describe("RuleEngineService - evaluate block / return", () => {
-  it("block=true when matching block rule", () => {
+  it("block=true when matching block rule", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       { id: "blk", condition: "ctx.request.path === '/bad'", block: true },
     ]));
-    expect(svc.evaluate(makeCtx(app, "/bad")).block).toBe(true);
-    expect(svc.evaluate(makeCtx(app, "/good")).block).toBe(false);
+    await svc.init();
+    expect((await svc.evaluate(makeCtx(app, "/bad"))).block).toBe(true);
+    expect((await svc.evaluate(makeCtx(app, "/good"))).block).toBe(false);
   });
 
-  it("block rule disables cache and browser_challenge", () => {
+  it("block rule disables cache and browser_challenge", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       { id: "blk", condition: "true", block: true },
     ]));
-    const dec = svc.evaluate(makeCtx(app, "/any"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/any"));
     expect(dec.cache?.enabled).toBe(false);
     expect(dec.browser_challenge?.enabled).toBe(false);
   });
 
-  it("return rule carries return payload and disables cache", () => {
+  it("return rule carries return payload and disables cache", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       {
@@ -175,30 +185,51 @@ describe("RuleEngineService - evaluate block / return", () => {
         return: { status: 403, text: "Forbidden" },
       },
     ]));
-    const dec = svc.evaluate(makeCtx(app, "/custom"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/custom"));
     expect(dec.block).toBe(false);
     expect(dec.return?.status).toBe(403);
     expect(dec.return?.text).toBe("Forbidden");
     expect(dec.cache?.enabled).toBe(false);
   });
 
-  it("block rule stops further rule processing", () => {
+  it("block rule stops further rule processing", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       { id: "blk", condition: "true", block: true },
       // 第二条本应覆盖 cache，但因 block 已终止，不应生效
       { id: "cache", condition: "true", cache: { enabled: true, ttl: 999 } },
     ]));
-    const dec = svc.evaluate(makeCtx(app, "/any"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/any"));
     expect(dec.block).toBe(true);
     expect(dec.cache?.ttl).not.toBe(999);
   });
 });
 
+// ─── evaluate：exec ────────────────────────────────────────────────────
+describe("RuleEngineService - evaluate exec", () => {
+  it("exec code can modify decision", async () => {
+    const app = makeKoaApp();
+    const svc = new RuleEngineService(app, makeConfig([
+      {
+        id: "exec",
+        condition: "ctx.request.path === '/exec'",
+        exec: "state.test = 123;",
+      },
+    ]));
+    await svc.init();
+    const ctx = makeCtx(app, "/exec");
+    const dec = await svc.evaluate(ctx);
+    expect(ctx.state.ruleEngineState?.test).toBe(123);
+  });
+});
+
+
 // ─── evaluate：cache / browser_challenge 策略合并 ─────────────────────────────
 
 describe("RuleEngineService - evaluate cache / browser_challenge policy", () => {
-  it("cache policy from matching rule overrides default", () => {
+  it("cache policy from matching rule overrides default", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       {
@@ -207,13 +238,14 @@ describe("RuleEngineService - evaluate cache / browser_challenge policy", () => 
         cache: { enabled: true, ttl: 3600, cache_key_mode: "path" },
       },
     ]));
-    const dec = svc.evaluate(makeCtx(app, "/static/logo.png"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/static/logo.png"));
     expect(dec.cache?.enabled).toBe(true);
     expect(dec.cache?.ttl).toBe(3600);
     expect(dec.cache?.cache_key_mode).toBe("path");
   });
 
-  it("browser_challenge disabled by matching rule", () => {
+  it("browser_challenge disabled by matching rule", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       {
@@ -222,29 +254,32 @@ describe("RuleEngineService - evaluate cache / browser_challenge policy", () => 
         browser_challenge: { enabled: false },
       },
     ]));
-    expect(svc.evaluate(makeCtx(app, "/healthz")).browser_challenge?.enabled).toBe(false);
-    expect(svc.evaluate(makeCtx(app, "/other")).browser_challenge?.enabled).toBe(true);
+    await svc.init();
+    expect((await svc.evaluate(makeCtx(app, "/healthz"))).browser_challenge?.enabled).toBe(false);
+    expect((await svc.evaluate(makeCtx(app, "/other"))).browser_challenge?.enabled).toBe(true);
   });
 
-  it("later matching rule overrides earlier cache policy (last-hit wins)", () => {
+  it("later matching rule overrides earlier cache policy (last-hit wins)", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       { id: "r1", condition: "true", cache: { enabled: true, ttl: 60 } },
       { id: "r2", condition: "ctx.request.path === '/nocache'", cache: { enabled: false, ttl: 1 } },
     ]));
+    await svc.init();
     // r2 命中，覆盖 r1
-    expect(svc.evaluate(makeCtx(app, "/nocache")).cache?.enabled).toBe(false);
+    expect((await svc.evaluate(makeCtx(app, "/nocache"))).cache?.enabled).toBe(false);
     // r2 不命中，保留 r1 设置
-    expect(svc.evaluate(makeCtx(app, "/other")).cache?.enabled).toBe(true);
+    expect((await svc.evaluate(makeCtx(app, "/other"))).cache?.enabled).toBe(true);
   });
 
-  it("last=true stops further rule processing", () => {
+  it("last=true stops further rule processing", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       { id: "r1", condition: "true", cache: { enabled: true, ttl: 100 }, last: true },
       { id: "r2", condition: "true", cache: { enabled: false, ttl: 1 } }, // 不应执行
     ]));
-    const dec = svc.evaluate(makeCtx(app, "/x"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/x"));
     expect(dec.cache?.enabled).toBe(true);
     expect(dec.cache?.ttl).toBe(100);
   });
@@ -253,14 +288,15 @@ describe("RuleEngineService - evaluate cache / browser_challenge policy", () => 
 // ─── evaluate：matcher 运行时错误容忍 ────────────────────────────────────────
 
 describe("RuleEngineService - evaluate runtime fault tolerance", () => {
-  it("silently skips a rule whose matcher throws at runtime", () => {
+  it("silently skips a rule whose matcher throws at runtime", async () => {
     const app = makeKoaApp();
     // 该 condition 在 dry-run 时可通过，但在特定输入下会抛异常
     // 用 presets 访问一个不存在的方法来触发运行时错误无法直接测，改用多规则场景验证跳过逻辑
     const svc = new RuleEngineService(app, makeConfig([
       { id: "safe", condition: "true", cache: { enabled: true, ttl: 42 } },
     ]));
-    const dec = svc.evaluate(makeCtx(app, "/any"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/any"));
     // 正常规则仍然生效
     expect(dec.cache?.enabled).toBe(true);
     expect(dec.cache?.ttl).toBe(42);
@@ -270,19 +306,21 @@ describe("RuleEngineService - evaluate runtime fault tolerance", () => {
 // ─── evaluate：cache_key 构建 ─────────────────────────────────────────────────
 
 describe("RuleEngineService - cache_key generation", () => {
-  it("default cache_key_mode=path+query sorts query params", () => {
+  it("default cache_key_mode=path+query sorts query params", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([]));
-    const dec = svc.evaluate(makeCtx(app, "/page?z=1&a=2"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/page?z=1&a=2"));
     expect(dec.cache_key).toBe(`${PAGE_CACHE_KEY_PREFIX}unknown:/page:?a=2&z=1`);
   });
 
-  it("path mode strips query string", () => {
+  it("path mode strips query string", async () => {
     const app = makeKoaApp();
     const svc = new RuleEngineService(app, makeConfig([
       { id: "c1", condition: "true", cache: { enabled: true, cache_key_mode: "path" } },
     ]));
-    const dec = svc.evaluate(makeCtx(app, "/page?foo=bar"));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx(app, "/page?foo=bar"));
     expect(dec.cache_key).toBe(`${PAGE_CACHE_KEY_PREFIX}unknown:/page`);
   });
 });

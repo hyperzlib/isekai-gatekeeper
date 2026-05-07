@@ -18,6 +18,7 @@ export interface RuleActionCachePolicy {
 
 export interface RuleActionBrowserChallengePolicy {
   enabled: boolean;
+  re_challenge?: boolean;
 }
 
 export type RuleAction = {
@@ -29,6 +30,8 @@ export type RuleAction = {
   cache?: RuleActionCachePolicy;
   /** 设置浏览器挑战策略 */
   browser_challenge?: RuleActionBrowserChallengePolicy;
+  /** 运行自定义操作 */
+  exec?: string;
 }
 
 /** 规则配置 */
@@ -36,6 +39,8 @@ export type RuleConfig = {
   id: string;
   description?: string;
   condition: string;
+  /** 是否跳过表达式测试 */
+  skip_test?: boolean;
   /** last = true 则命中后不再继续匹配后续规则 */
   last?: boolean;
 } & RuleAction;

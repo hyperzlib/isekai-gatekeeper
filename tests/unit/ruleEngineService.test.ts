@@ -17,6 +17,7 @@ function makeConfig(
   return {
     proxy: { server_port: 8080 },
     api: { server_port: 8081, key: "key" },
+    cluster: { enabled: false, num_workers: 0, admin_host: "127.0.0.1" },
     templates_dir: "./views",
     browser_challenge: {
       enabled: overrides.browserChallengeEnabled ?? true,

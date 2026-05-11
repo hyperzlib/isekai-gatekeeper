@@ -12,4 +12,6 @@ export type ServiceContainer = {
   proxyService: ProxyService;
   tpl: TemplateService;
   geoipService: GeoIPService;
-}
+};
+
+export type AdminServiceContainer = Pick<ServiceContainer, "cacheService">;

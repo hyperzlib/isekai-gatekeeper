@@ -1,4 +1,4 @@
-import { ICacheStore } from "../types/cache";
+import { ICacheStore } from "../../types/cache";
 
 interface CacheEntry {
   value: any;

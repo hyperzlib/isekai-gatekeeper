@@ -1,4 +1,4 @@
-import { hmacSha256Hex, sha256Bytes, hexToBuf } from "../lib/crypto.ts";
+import { hmacSha256Hex, sha256Bytes, hexToBuf } from "../utils/crypto.ts";
 import type { BrowserChallengeConfig } from "../types/config.ts";
 
 export interface ChallengePayload {

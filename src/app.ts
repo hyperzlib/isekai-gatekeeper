@@ -6,7 +6,7 @@ import { errorMiddleware } from "./middlewares/errorMiddleware.ts";
 import { firewallMiddleware } from "./middlewares/firewallMiddleware.ts";
 import { registerProxyRoutes, registerAdminRoutes } from "./routes/index.ts";
 import { ipMiddleware as geoipMiddleware } from "./middlewares/ipMiddleware.ts";
-import { ServiceContainer } from "./types/service.ts";
+import { AdminServiceContainer, ServiceContainer } from "./types/service.ts";
 import { siteLookupMiddleware } from "./middlewares/siteLookupMiddleware.ts";
 import { reverseProxyMiddleware } from "./middlewares/proxyMiddleware.ts";
 
@@ -61,18 +61,13 @@ export async function createProxyApp(
  */
 export async function createApiApp(
   cfg: AppConfig,
-  services: ServiceContainer,
+  services: AdminServiceContainer,
 ): Promise<Koa> {
   const app = new Koa();
 
   app.context.appConfig = cfg;
 
   app.context.cacheService = services.cacheService;
-  app.context.captchaService = services.captchaService;
-  app.context.rateLimitService = services.rateLimitService;
-  app.context.proxyService = services.proxyService;
-  app.context.tpl = services.tpl;
-  app.context.geoipService = services.geoipService;
 
   app.on("error", (err: Error) => {
     console.error("[api] unhandled error:", err.message);

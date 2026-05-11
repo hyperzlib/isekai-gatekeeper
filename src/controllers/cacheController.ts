@@ -1,6 +1,16 @@
 import type Koa from "koa";
-import { timingSafeEqual } from "../lib/crypto.ts";
+import { timingSafeEqual } from "../utils/crypto.ts";
 import { makePageCacheKey } from "../utils/cache.ts";
+
+function ensureAdminAuthorized(ctx: Koa.Context): boolean {
+  const apiKey = ctx.headers["x-api-key"];
+  if (typeof apiKey !== "string" || !timingSafeEqual(apiKey, ctx.appConfig.api.key)) {
+    ctx.status = 401;
+    ctx.body = { error: "Unauthorized" };
+    return false;
+  }
+  return true;
+}
 
 function resolveSiteIdByHostname(ctx: Koa.Context, hostname: string): string | null {
   const normalized = hostname.toLowerCase();
@@ -30,12 +40,7 @@ function resolveSiteIdByHostname(ctx: Koa.Context, hostname: string): string | n
  * 请求必须包含有效的 API Key（通过 `x-api-key` 请求头提供）。
  */
 export const deleteCache = async (ctx: Koa.Context) => {
-  const apiKey = ctx.headers["x-api-key"];
-  if (typeof apiKey !== "string" || !timingSafeEqual(apiKey, ctx.appConfig.api.key)) {
-    ctx.status = 401;
-    ctx.body = { error: "Unauthorized" };
-    return;
-  }
+  if (!ensureAdminAuthorized(ctx)) return;
 
   const body = (ctx.request.body ?? {}) as Record<string, unknown>;
 
@@ -106,4 +111,80 @@ export const deleteCache = async (ctx: Koa.Context) => {
     error:
       "Request body must contain one of: ('site' + 'path'), ('site' + 'prefix'), 'url', or 'urlPrefix'",
   };
+};
+
+export const getRawCache = async (ctx: Koa.Context) => {
+  if (!ensureAdminAuthorized(ctx)) return;
+
+  const body = (ctx.request.body ?? {}) as Record<string, unknown>;
+  const key = body["key"];
+  if (typeof key !== "string" || key.length === 0) {
+    ctx.status = 400;
+    ctx.body = { error: "Invalid 'key'" };
+    return;
+  }
+
+  const value = await ctx.cacheService.get<unknown>(key);
+  ctx.body = { key, hit: value !== null, value };
+};
+
+export const setRawCache = async (ctx: Koa.Context) => {
+  if (!ensureAdminAuthorized(ctx)) return;
+
+  const body = (ctx.request.body ?? {}) as Record<string, unknown>;
+  const key = body["key"];
+  if (typeof key !== "string" || key.length === 0) {
+    ctx.status = 400;
+    ctx.body = { error: "Invalid 'key'" };
+    return;
+  }
+
+  const ttl = body["ttl"];
+  const ttlSec = typeof ttl === "number" && Number.isFinite(ttl) ? Math.max(1, Math.floor(ttl)) : undefined;
+  await ctx.cacheService.set(key, body["value"], ttlSec);
+  ctx.body = { ok: true, key, ttl: ttlSec ?? null };
+};
+
+export const deleteRawCache = async (ctx: Koa.Context) => {
+  if (!ensureAdminAuthorized(ctx)) return;
+
+  const body = (ctx.request.body ?? {}) as Record<string, unknown>;
+  const key = body["key"];
+  if (typeof key !== "string" || key.length === 0) {
+    ctx.status = 400;
+    ctx.body = { error: "Invalid 'key'" };
+    return;
+  }
+
+  await ctx.cacheService.delete(key);
+  ctx.body = { ok: true, key };
+};
+
+export const deleteRawCacheByPrefix = async (ctx: Koa.Context) => {
+  if (!ensureAdminAuthorized(ctx)) return;
+
+  const body = (ctx.request.body ?? {}) as Record<string, unknown>;
+  const prefix = body["prefix"];
+  if (typeof prefix !== "string" || prefix.length === 0) {
+    ctx.status = 400;
+    ctx.body = { error: "Invalid 'prefix'" };
+    return;
+  }
+
+  const deleted = await ctx.cacheService.deleteByPrefix(prefix);
+  ctx.body = { ok: true, prefix, deleted };
+};
+
+export const getRawCacheSize = async (ctx: Koa.Context) => {
+  if (!ensureAdminAuthorized(ctx)) return;
+
+  const cacheWithSize = ctx.cacheService as unknown as { size?: () => Promise<number> };
+  if (!cacheWithSize.size) {
+    ctx.status = 501;
+    ctx.body = { error: "Current cache provider does not expose size()" };
+    return;
+  }
+
+  const size = await cacheWithSize.size();
+  ctx.body = { size };
 };

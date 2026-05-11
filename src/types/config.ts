@@ -127,6 +127,19 @@ export interface ApiConfig {
   key: string;
 }
 
+/** 集群配置 */
+export interface ClusterConfig {
+  enabled: boolean;
+  /**
+   * worker 数量；0 表示使用 CPU 核心数。
+   */
+  num_workers: number;
+  /**
+   * 管理 API 监听地址，默认仅本地回环。
+   */
+  admin_host: string;
+}
+
 /** 应用全量配置 */
 export interface AppConfig {
   debug?: boolean;
@@ -135,6 +148,7 @@ export interface AppConfig {
   api: ApiConfig;
   browser_challenge: BrowserChallengeConfig;
   cache: CacheConfig;
+  cluster: ClusterConfig;
   geoip?: GeoIPConfig;
   captcha?: CaptchaConfig;
   /** key 为 site 名称 */

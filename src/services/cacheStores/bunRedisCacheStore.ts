@@ -1,5 +1,5 @@
 import { RedisClient } from "bun";
-import { ICacheStore } from "../types/cache";
+import { ICacheStore } from "../../types/cache";
 
 export class BunRedisCacheStore implements ICacheStore {
     private client: RedisClient;

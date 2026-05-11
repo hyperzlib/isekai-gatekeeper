@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { hmacSha256Hex, timingSafeEqual, hexToBuf, bufToHex } from "../../src/lib/crypto.ts";
+import { hmacSha256Hex, timingSafeEqual, hexToBuf, bufToHex } from "../../src/utils/crypto.ts";
 
 describe("crypto utilities", () => {
   it("hmacSha256Hex produces consistent output", async () => {

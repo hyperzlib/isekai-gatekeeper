@@ -132,6 +132,17 @@ const AppConfigSchema = z.object({
     server_port: z.number().int().min(1).max(65535),
     key: z.string().min(1),
   }),
+  cluster: z
+    .object({
+      enabled: z.boolean().default(false),
+      num_workers: z.number().int().min(0).default(0),
+      admin_host: z.string().min(1).default("127.0.0.1"),
+    })
+    .default({
+      enabled: false,
+      num_workers: 0,
+      admin_host: "127.0.0.1",
+    }),
   browser_challenge: z.object({
     enabled: z.boolean(),
     cookie_ttl: z.number().int().positive(),
@@ -263,6 +274,7 @@ export function loadConfig(): AppConfig {
     templates_dir: data.templates_dir ?? "./views",
     proxy: data.proxy,
     api: data.api,
+    cluster: data.cluster,
     browser_challenge: data.browser_challenge,
     cache: data.cache,
     captcha: data.captcha,

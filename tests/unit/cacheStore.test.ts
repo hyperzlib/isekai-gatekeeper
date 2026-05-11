@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { MemoryCacheStore } from "../../src/lib/memoryCacheStore.ts";
+import { MemoryCacheStore } from "../../src/services/cacheStores/memoryCacheStore.ts";
 import { CachedResponse } from "../../src/types/cache.ts";
 
 function makeResp(body: string, ttl = 60): CachedResponse {

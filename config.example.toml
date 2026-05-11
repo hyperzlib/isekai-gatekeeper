@@ -8,6 +8,11 @@ server_port = 8080
 server_port = 8081
 key = "change-me-api-key"
 
+[cluster]
+enabled = false
+num_workers = 0 # 0 表示自动使用 CPU 核心数
+admin_host = "127.0.0.1"
+
 [browser_challenge]
 enabled = true
 cookie_ttl = 86400        # 秒，PoW Cookie 有效期

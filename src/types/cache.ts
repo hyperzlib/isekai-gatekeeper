@@ -17,3 +17,38 @@ export interface ICacheStore {
 
 /** 页面缓存键 */
 export type CacheKeyModeType = "path" | "path+query";
+
+export type IpcCacheOp = "get" | "set" | "delete" | "deleteByPrefix" | "size" | "ping";
+
+export interface IpcCacheRequest {
+  kind: "ipc-cache:req";
+  requestId: string;
+  op: IpcCacheOp;
+  key?: string;
+  prefix?: string;
+  value?: unknown;
+  ttl?: number;
+}
+
+export interface IpcCacheExecute {
+  kind: "ipc-cache:exec";
+  requestId: string;
+  op: IpcCacheOp;
+  key?: string;
+  prefix?: string;
+  value?: unknown;
+  ttl?: number;
+  sourceWorkerId: number;
+}
+
+export interface IpcCacheResponse {
+  kind: "ipc-cache:res";
+  requestId: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+export interface IpcCacheExecutedResponse extends IpcCacheResponse {
+  sourceWorkerId: number;
+}

@@ -1,4 +1,4 @@
-import { MemoryCacheStore } from "../lib/memoryCacheStore.ts";
+import { MemoryCacheStore } from "./cacheStores/memoryCacheStore.ts";
 import { CachedResponse, ICacheStore } from "../types/cache.ts";
 import type { AppConfig, CacheConfig } from "../types/config.ts";
 
@@ -7,16 +7,24 @@ export type { CachedResponse };
 export class CacheService {
   readonly cacheConfig: CacheConfig;
   private store!: ICacheStore;
+  private readonly injectedStore?: ICacheStore;
 
-  constructor(cfg: AppConfig) {
+  constructor(cfg: AppConfig, options?: { store?: ICacheStore }) {
     this.cacheConfig = cfg.cache;
+    this.injectedStore = options?.store;
   }
 
   public async init() {
+    if (this.injectedStore) {
+      this.store = this.injectedStore;
+      await this.store.init();
+      return;
+    }
+
     console.log("[cache] Initializing cache service with provider:", this.cacheConfig.provider);
     switch (this.cacheConfig.provider) {
       case "memory":
-        const { MemoryCacheStore } = await import("../lib/memoryCacheStore.ts");
+        const { MemoryCacheStore } = await import("./cacheStores/memoryCacheStore.ts");
         this.store = new MemoryCacheStore(
           this.cacheConfig.max_entries,
           this.cacheConfig.max_body_bytes,
@@ -29,7 +37,7 @@ export class CacheService {
           throw new Error("Bun Redis cache provider requires cache.bun_redis.url configuration");
         }
 
-        const { BunRedisCacheStore } = await import("../lib/bunRedisCacheStore.ts");
+        const { BunRedisCacheStore } = await import("./cacheStores/bunRedisCacheStore.ts");
         this.store = new BunRedisCacheStore(
           this.cacheConfig.bun_redis.url,
           this.cacheConfig.max_body_bytes,
@@ -56,5 +64,13 @@ export class CacheService {
 
   public deleteByPrefix(prefix: string): Promise<number> {
     return this.store.deleteByPrefix(prefix);
+  }
+
+  public async size(): Promise<number> {
+    const storeWithSize = this.store as unknown as { size?: () => Promise<number> };
+    if (!storeWithSize.size) {
+      throw new Error("Cache store does not support size()");
+    }
+    return storeWithSize.size();
   }
 }

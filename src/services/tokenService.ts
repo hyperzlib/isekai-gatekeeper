@@ -1,5 +1,5 @@
 import type Koa from "koa";
-import { hmacSha256Hex, timingSafeEqual } from "../lib/crypto.ts";
+import { hmacSha256Hex, timingSafeEqual } from "../utils/crypto.ts";
 import { randomUUID } from "crypto";
 
 export const TOKEN_COOKIE_NAME = "isekai_gatekeeper_token";

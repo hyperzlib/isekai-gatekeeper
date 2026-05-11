@@ -77,7 +77,7 @@ describe("challengeService - verifyChallengeToken", () => {
 
   it("rejects an expired challenge", async () => {
     const past = Math.floor(Date.now() / 1000) - 1;
-    const token = await (await import("../../src/lib/crypto.ts")).hmacSha256Hex(
+    const token = await (await import("../../src/utils/crypto.ts")).hmacSha256Hex(
       `fakechallenge:${past}`,
       MOCK_CFG.secret,
     );

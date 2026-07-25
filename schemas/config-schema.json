@@ -1,0 +1,528 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Isekai Gatekeeper — AppConfig",
+  "description": "isekai-gatekeeper 的 config.toml 完整 JSON Schema。配合 Even Better TOML 等 VS Code 插件可在编辑 config.toml 时提供自动补全与校验。",
+  "type": "object",
+  "properties": {
+    "debug": {
+      "type": "boolean"
+    },
+    "templates_dir": {
+      "type": "string",
+      "minLength": 1,
+      "default": "./views"
+    },
+    "proxy": {
+      "type": "object",
+      "properties": {
+        "server_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      },
+      "required": [
+        "server_port"
+      ],
+      "additionalProperties": false
+    },
+    "api": {
+      "type": "object",
+      "properties": {
+        "server_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "server_port",
+        "key"
+      ],
+      "additionalProperties": false
+    },
+    "browser_challenge": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "cookie_ttl": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "challenge_ttl": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "tpl": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pow": {
+          "type": "object",
+          "properties": {
+            "difficulty": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            }
+          },
+          "required": [
+            "difficulty"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "enabled",
+        "cookie_ttl",
+        "challenge_ttl",
+        "secret",
+        "pow"
+      ],
+      "additionalProperties": false
+    },
+    "cache": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "default_ttl": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "memory",
+            "bun+redis"
+          ],
+          "default": "memory"
+        },
+        "bun_redis": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        "cache_key_mode": {
+          "type": "string",
+          "enum": [
+            "path+query",
+            "path"
+          ],
+          "default": "path+query"
+        },
+        "cache_tags_callback": {
+          "type": "string"
+        },
+        "max_entries": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "max_body_bytes": {
+          "type": "integer",
+          "exclusiveMinimum": 0
+        },
+        "allowed_mimetypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "text/html",
+            "application/json",
+            "text/plain",
+            "text/css",
+            "application/javascript",
+            "text/javascript"
+          ]
+        },
+        "bypass_after_challenge": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "required": [
+        "enabled",
+        "default_ttl",
+        "max_entries",
+        "max_body_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "captcha": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "recaptcha",
+            "hcaptcha",
+            "geetest",
+            "turnstile",
+            "funcaptcha",
+            "aliyun",
+            "tencent"
+          ]
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "recaptcha": {
+          "type": "object",
+          "properties": {
+            "site_key": {
+              "type": "string"
+            },
+            "secret_key": {
+              "type": "string"
+            },
+            "api_domain": {
+              "type": "string"
+            },
+            "js_domain": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "site_key",
+            "secret_key"
+          ],
+          "additionalProperties": false,
+          "default": {
+            "site_key": "",
+            "secret_key": ""
+          }
+        },
+        "hcaptcha": {
+          "type": "object",
+          "properties": {
+            "site_key": {
+              "type": "string"
+            },
+            "secret_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "site_key",
+            "secret_key"
+          ],
+          "additionalProperties": false,
+          "default": {
+            "site_key": "",
+            "secret_key": ""
+          }
+        },
+        "geetest": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "key"
+          ],
+          "additionalProperties": false,
+          "default": {
+            "id": "",
+            "key": ""
+          }
+        },
+        "turnstile": {
+          "type": "object",
+          "properties": {
+            "site_key": {
+              "type": "string"
+            },
+            "secret_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "site_key",
+            "secret_key"
+          ],
+          "additionalProperties": false,
+          "default": {
+            "site_key": "",
+            "secret_key": ""
+          }
+        },
+        "funcaptcha": {
+          "type": "object",
+          "properties": {
+            "public_key": {
+              "type": "string"
+            },
+            "private_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "public_key",
+            "private_key"
+          ],
+          "additionalProperties": false,
+          "default": {
+            "public_key": "",
+            "private_key": ""
+          }
+        },
+        "aliyun": {
+          "type": "object",
+          "properties": {
+            "access_key_id": {
+              "type": "string"
+            },
+            "access_key_secret": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "access_key_id",
+            "access_key_secret"
+          ],
+          "additionalProperties": false,
+          "default": {
+            "access_key_id": "",
+            "access_key_secret": ""
+          }
+        },
+        "tencent": {
+          "type": "object",
+          "properties": {
+            "secret_id": {
+              "type": "string"
+            },
+            "secret_key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "secret_id",
+            "secret_key"
+          ],
+          "additionalProperties": false,
+          "default": {
+            "secret_id": "",
+            "secret_key": ""
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "geoip": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "db_country_path": {
+          "type": "string"
+        },
+        "db_asn_path": {
+          "type": "string"
+        },
+        "db_city_path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "site": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "backend": {
+            "type": "object",
+            "properties": {
+              "hostname": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": {
+                  "type": "string"
+                },
+                "condition": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "skip_test": {
+                  "type": "boolean"
+                },
+                "last": {
+                  "type": "boolean"
+                },
+                "block": {
+                  "type": "boolean"
+                },
+                "return": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "integer"
+                    },
+                    "headers": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "tpl": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "cache": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "ttl": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "cache_key_mode": {
+                      "type": "string",
+                      "enum": [
+                        "path+query",
+                        "path"
+                      ]
+                    },
+                    "cache_tags_callback": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "enabled"
+                  ],
+                  "additionalProperties": false
+                },
+                "browser_challenge": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "re_challenge": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "enabled"
+                  ],
+                  "additionalProperties": false
+                },
+                "exec": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "condition"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "hostname",
+          "backend"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "proxy",
+    "api",
+    "browser_challenge",
+    "cache",
+    "site"
+  ],
+  "additionalProperties": false
+}

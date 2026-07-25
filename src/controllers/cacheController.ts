@@ -26,6 +26,7 @@ function resolveSiteIdByHostname(ctx: Koa.Context, hostname: string): string | n
  * - `{"site": "example", "prefix": "/wiki/Category:"}` — 按前缀批量删除
  * - `{"url": "(https://)example.com/wiki/PageName"}` — 按完整 URL 删除
  * - `{"urlPrefix": "(https://)example.com/wiki/Category:"}` — 按 URL 前缀批量删除
+ * - `{"tag": "wiki"}` — 按 tag 删除所有关联缓存
  * 
  * 请求必须包含有效的 API Key（通过 `x-api-key` 请求头提供）。
  */
@@ -38,6 +39,12 @@ export const deleteCache = async (ctx: Koa.Context) => {
   }
 
   const body = (ctx.request.body ?? {}) as Record<string, unknown>;
+
+  if (typeof body["tag"] === "string") {
+    const count = await ctx.cacheService.deleteByTag(body["tag"]);
+    ctx.body = { deleted: count };
+    return;
+  }
 
   if (typeof body["site"] === "string" && typeof body["path"] === "string") {
     const keyPrefix = makePageCacheKey(body["site"], body["path"], "", "path");
@@ -104,6 +111,60 @@ export const deleteCache = async (ctx: Koa.Context) => {
   ctx.status = 400;
   ctx.body = {
     error:
-      "Request body must contain one of: ('site' + 'path'), ('site' + 'prefix'), 'url', or 'urlPrefix'",
+      "Request body must contain one of: 'tag', ('site' + 'path'), ('site' + 'prefix'), 'url', or 'urlPrefix'",
+  };
+};
+
+/**
+ * POST /api/v1/list_cached_pages
+ *
+ * 请求体：
+ * - `{"urlPrefix": "(https://)example.com/wiki/Category:"}` — 按 URL 前缀列出
+ * - `{"tag": "wiki"}` — 按 tag 列出
+ *
+ * 请求必须包含有效的 API Key（通过 `x-api-key` 请求头提供）。
+ */
+export const listCachedPages = async (ctx: Koa.Context) => {
+  const apiKey = ctx.headers["x-api-key"];
+  if (typeof apiKey !== "string" || !timingSafeEqual(apiKey, ctx.appConfig.api.key)) {
+    ctx.status = 401;
+    ctx.body = { error: "Unauthorized" };
+    return;
+  }
+
+  const body = (ctx.request.body ?? {}) as Record<string, unknown>;
+
+  if (typeof body["tag"] === "string") {
+    const keys = await ctx.cacheService.listByTag(body["tag"]);
+    ctx.body = { keys };
+    return;
+  }
+
+  if (typeof body["urlPrefix"] === "string") {
+    let parsed: URL;
+    try {
+      parsed = new URL(body["urlPrefix"]);
+    } catch {
+      ctx.status = 400;
+      ctx.body = { error: "Invalid 'urlPrefix'" };
+      return;
+    }
+
+    const site = resolveSiteIdByHostname(ctx, parsed.hostname);
+    if (!site) {
+      ctx.status = 400;
+      ctx.body = { error: "No site matched by URL prefix hostname" };
+      return;
+    }
+
+    const keyPrefix = makePageCacheKey(site, parsed.pathname, "", "path");
+    const keys = await ctx.cacheService.listByPrefix(keyPrefix);
+    ctx.body = { keys };
+    return;
+  }
+
+  ctx.status = 400;
+  ctx.body = {
+    error: "Request body must contain 'tag' or 'urlPrefix'",
   };
 };

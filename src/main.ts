@@ -1,7 +1,6 @@
 import { loadConfig } from "./config/loadConfig.ts";
-import geoip from 'geoip-lite';
-import { RuleEngineService } from "./services/ruleEngineService.ts";
 import { CacheService } from "./services/cacheService.ts";
+import { CleanupService } from "./services/cleanupService.ts";
 import { ProxyService } from "./services/proxyService.ts";
 import { createProxyApp, createApiApp } from "./app.ts";
 import { TemplateService } from "./services/templateService.ts";
@@ -17,7 +16,7 @@ async function main() {
 
   const cacheService = new CacheService(cfg);
   await cacheService.init();
-  
+
   const proxyService = new ProxyService(cfg, cacheService);
   const captchaService = new CaptchaService(cfg);
 
@@ -29,9 +28,19 @@ async function main() {
   const geoipService = new GeoIPService(cfg);
   await geoipService.init();
 
+  // 集中清理服务
+  const cleanupService = new CleanupService();
+  cleanupService.register(
+    "cache-tag-expiry",
+    5 * 60 * 1000, // 每 5 分钟
+    () => cacheService.cleanExpiredTagIndices(),
+  );
+  cleanupService.start();
+
   const serviceContainer: ServiceContainer = {
     cacheService,
     captchaService,
+    cleanupService,
     rateLimitService,
     proxyService,
     tpl: templateService,
@@ -53,6 +62,7 @@ async function main() {
   // 退出时清理资源
   const shutdown = () => {
     console.log("[boot] Shutting down...");
+    cleanupService.stop();
     proxyServer.close();
     apiServer.close();
     proxyService.close();

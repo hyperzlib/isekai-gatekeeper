@@ -22,6 +22,7 @@ const RuleActionCachePolicySchema = z.object({
   enabled: z.boolean(),
   ttl: z.number().int().positive().optional(),
   cache_key_mode: z.enum(["path+query", "path"]).optional(),
+  cache_tags_callback: z.string().optional(),
 });
 
 const RuleActionBrowserChallengePolicySchema = z.object({
@@ -122,7 +123,7 @@ const BunRedisConfigSchema = z.object({
 });
 //#endregion
 
-const AppConfigSchema = z.object({
+export const AppConfigSchema = z.object({
   debug: z.boolean().optional(),
   templates_dir: z.string().min(1).default("./views"),
   proxy: z.object({
@@ -148,6 +149,7 @@ const AppConfigSchema = z.object({
     provider: z.enum(["memory", "bun+redis"]).default("memory"),
     bun_redis: BunRedisConfigSchema.optional(),
     cache_key_mode: z.enum(["path+query", "path"]).default("path+query"),
+    cache_tags_callback: z.string().optional(),
     max_entries: z.number().int().positive(),
     max_body_bytes: z.number().int().positive(),
     allowed_mimetypes: z.array(z.string()).default([

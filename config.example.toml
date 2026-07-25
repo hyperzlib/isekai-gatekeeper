@@ -1,3 +1,4 @@
+#:schema ./schemas/config-schema.json
 debug = false
 templates_dir = "./views"
 
@@ -111,8 +112,20 @@ browser_challenge = { enabled = false }
 id = "cache-wiki"
 condition = 'matchGlob(http.request.uri.path, "/wiki/*")'
 last = true
-cache = { enabled = true, ttl = 86400, cache_key_mode = "path+query" }
 browser_challenge = { enabled = false }
+
+[[site.example.rules.cache]]
+enabled = true
+ttl = 86400
+cache_key_mode = "path+query"
+cache_tags_callback = """
+let pageTitle = matchExtractGroup(http.request.uri.path, /^\/wiki\/(?<title>.*?)\/?/, 'title') ??
+    (http.request.uri.args["title"] ?? [])[0];
+if (pageTitle) {
+    cacheTags.push(pageTitle);
+}
+"""
+
 
 # 规则：放行来自 CN 的请求
 [[site.example.rules]]

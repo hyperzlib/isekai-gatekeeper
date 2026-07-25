@@ -34,6 +34,7 @@ type PageCacheEntry = {
   body: string;
   cachedAt: number;
   ttl: number;
+  tags?: string[];
 };
 
 /**
@@ -253,13 +254,15 @@ export class ProxyService {
           }
 
           const bodyText = bodyBuffer.toString("utf-8");
+          const cacheTags = decision.cache_tags;
           this.cacheService.set<PageCacheEntry>(decision.cache_key, {
             status: resp.status,
             headers: cachedHeaders,
             body: bodyText,
             cachedAt: Date.now(),
             ttl: decision.cache?.ttl ?? this.appConfig.cache.default_ttl,
-          }, decision.cache?.ttl ?? this.appConfig.cache.default_ttl);
+            tags: cacheTags,
+          }, decision.cache?.ttl ?? this.appConfig.cache.default_ttl, cacheTags);
 
           if (this.appConfig.debug) {
             console.log(`[ProxyService] Cached: ${resp.status} ${ctx.url} (key: ${decision.cache_key})`);

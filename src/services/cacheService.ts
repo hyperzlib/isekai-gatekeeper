@@ -46,8 +46,8 @@ export class CacheService {
     return this.store.get<T>(key);
   }
 
-  public set<T>(key: string, resp: T, ttl?: number): Promise<void> {
-    return this.store.set<T>(key, resp, ttl);
+  public set<T>(key: string, resp: T, ttl?: number, tags?: string[]): Promise<void> {
+    return this.store.set<T>(key, resp, ttl, tags);
   }
 
   public delete(key: string): Promise<void> {
@@ -56,5 +56,21 @@ export class CacheService {
 
   public deleteByPrefix(prefix: string): Promise<number> {
     return this.store.deleteByPrefix(prefix);
+  }
+
+  public deleteByTag(tag: string): Promise<number> {
+    return this.store.deleteByTag(tag);
+  }
+
+  public listByTag(tag: string): Promise<string[]> {
+    return this.store.listByTag(tag);
+  }
+
+  public listByPrefix(prefix: string): Promise<string[]> {
+    return this.store.listByPrefix(prefix);
+  }
+
+  public cleanExpiredTagIndices(): Promise<number> {
+    return this.store.cleanExpiredTagIndices();
   }
 }

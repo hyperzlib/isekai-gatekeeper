@@ -22,14 +22,20 @@ type ExpressionGlobal = {
   state: Record<string, any>;
 } & RuleExpressionTools;
 
+type CacheKeyExpressionGlobal = ExpressionGlobal & {
+  cacheKeys: string[]
+};
+
 type MatcherFunc = (input: ExpressionGlobal) => Promise<boolean>;
 type ExecFunc = (input: ExpressionGlobal) => Promise<void>;
+type CacheTagsCallbackFunc = (input: CacheKeyExpressionGlobal) => Promise<string[]>;
 
 /** 已编译的规则（条件函数在启动期生成） */
 interface CompiledRule {
   raw: RuleConfig;
   matcher: MatcherFunc;
   exec?: ExecFunc;
+  cacheTagsCallback?: CacheTagsCallbackFunc;
 }
 
 /** 每个 site 的已编译规则集 */
@@ -52,6 +58,11 @@ const EXAMPLE_REQUEST = {
 let expressionGlobalKeys = new Set<keyof ExpressionGlobal>([
   'ctx', 'http', 'presets', 'rateLimit', 'state',
   ...Object.keys(ruleExpressionTools) as (keyof RuleExpressionTools)[]
+]);
+
+let cacheKeysExpressionGlobalKeys = new Set<keyof CacheKeyExpressionGlobal>([
+  ...expressionGlobalKeys,
+  'cacheKeys'
 ]);
 
 function validateConditionSyntax(id: string, condition: string): void {
@@ -165,11 +176,66 @@ async function compileExec(app: Koa, id: string, exec: string): Promise<ExecFunc
   return fn
 }
 
+async function compileCacheTagsCallback(app: Koa, id: string, expression: string): Promise<CacheTagsCallbackFunc> {
+  validateConditionSyntax(id, expression);
+  let fn: CacheTagsCallbackFunc;
+  try {
+    // eslint-disable-next-line no-new-func
+    fn = new AsyncFunction("input", `"use strict"; const { ${Array.from(cacheKeysExpressionGlobalKeys).join(", ")} } = input; return (${expression});`) as CacheTagsCallbackFunc;
+  } catch (e) {
+    console.log(`cache_tags_callback compilation error in rule ${id}:`, e);
+    console.log("cache_tags_callback source:", expression);
+    throw new Error(
+      `rule=${id} field=cache.cache_tags_callback message=Syntax error: ${(e as Error).message}`,
+    );
+  }
+
+  // 用示例数据测试执行
+  try {
+    const exampleRequest: IncomingMessage = new IncomingMessage(null as unknown as any);
+    exampleRequest.method = EXAMPLE_REQUEST.method;
+    exampleRequest.url = EXAMPLE_REQUEST.url;
+    exampleRequest.headers = {};
+    exampleRequest.httpVersion = "1.1";
+    for (const [key, value] of Object.entries(EXAMPLE_REQUEST.headers)) {
+      exampleRequest.headers[key] = value;
+    }
+
+    const exampleResponse: ServerResponse = new ServerResponse(exampleRequest);
+    const exampleCtx = app.createContext(exampleRequest, exampleResponse);
+    exampleCtx.request.header = {
+      ...exampleCtx.request.header,
+      ...EXAMPLE_REQUEST.headers,
+    };
+
+    const result = await fn({
+      ctx: exampleCtx,
+      http: toCloudflareHttp(exampleCtx),
+      presets: new RulePresets(exampleCtx),
+      rateLimit: new RuleRateLimit(exampleCtx),
+      state: {},
+      ...ruleExpressionTools,
+      cacheKeys: [],
+    });
+    if (!Array.isArray(result)) {
+      throw new Error("cache_tags_callback must return an array of strings");
+    }
+  } catch (e) {
+    if ((e as Error).message.startsWith(`rule=${id}`)) throw e;
+    throw new Error(
+      `rule=${id} field=cache.cache_tags_callback message=Runtime error during test: ${(e as Error).message}`,
+    );
+  }
+
+  return fn;
+}
+
 export class RuleEngineService {
   private debug = false;
   private readonly compiledSites: Map<string, CompiledSite> = new Map();
   private readonly app: Koa;
   private readonly appConfig: AppConfig;
+  private globalCacheTagsCallback: CacheTagsCallbackFunc | null = null;
 
   constructor(app: Koa, appConfig: AppConfig) {
     this.app = app;
@@ -178,12 +244,24 @@ export class RuleEngineService {
   }
 
   async init() {
+    // 编译全局 cache_tags_callback（若配置）
+    if (this.appConfig.cache.cache_tags_callback) {
+      this.globalCacheTagsCallback = await compileCacheTagsCallback(
+        this.app,
+        "global",
+        this.appConfig.cache.cache_tags_callback,
+      );
+    }
+
     for (const [name, site] of Object.entries(this.appConfig.sites)) {
       const rules = site.rules ?? [];
       const compiled: CompiledRule[] = await Promise.all(rules.map(async (rule) => ({
         raw: rule,
         matcher: await compileCondition(this.app, rule.id, rule.condition),
         exec: rule.exec ? await compileExec(this.app, rule.id, rule.exec) : undefined,
+        cacheTagsCallback: rule.cache?.cache_tags_callback
+          ? await compileCacheTagsCallback(this.app, rule.id, rule.cache.cache_tags_callback)
+          : undefined,
       })));
       if (Array.isArray(site.hostname)) {
         for (const hostname of site.hostname) {
@@ -233,17 +311,20 @@ export class RuleEngineService {
     let returnData: RuleActionReturn | undefined = undefined;
     let cachePolicy: RuleActionCachePolicy = { ...defaultCachePolicy };
     let browserChallengePolicy: BrowserChallengePolicy = { ...defaultChallenge };
+    /** 按序收集所有匹配规则的 cacheTagsCallback */
+    const matchedCallbacks: CacheTagsCallbackFunc[] = [];
+
+    ctx.state.ruleEngineState ??= {};
+    let expressionGlobal: ExpressionGlobal = {
+      ctx,
+      http: toCloudflareHttp(ctx),
+      presets: new RulePresets(ctx),
+      rateLimit: new RuleRateLimit(ctx),
+      state: ctx.state.ruleEngineState,
+      ...ruleExpressionTools,
+    };
 
     if (entry.rules.length > 0) {
-      ctx.state.ruleEngineState ??= {};
-      let expressionGlobal: ExpressionGlobal = {
-        ctx,
-        http: toCloudflareHttp(ctx),
-        presets: new RulePresets(ctx),
-        rateLimit: new RuleRateLimit(ctx),
-        state: ctx.state.ruleEngineState,
-        ...ruleExpressionTools,
-      }
 
       for (const rule of entry.rules) {
         let matches: boolean;
@@ -265,6 +346,11 @@ export class RuleEngineService {
           } catch (e) {
             console.log(`Error executing custom script in rule ${rule.raw.id}:`, e);
           }
+        }
+
+        // 收集匹配规则的 cache_tags_callback
+        if (rule.cacheTagsCallback) {
+          matchedCallbacks.push(rule.cacheTagsCallback);
         }
 
         // block 与 return 都是终止动作
@@ -298,6 +384,42 @@ export class RuleEngineService {
       }
     }
 
+    // 链式执行所有匹配规则的 cache_tags_callback
+    let cacheTags: string[] | undefined = undefined;
+    if (matchedCallbacks.length > 0) {
+      let tags: string[] = [];
+      for (const cb of matchedCallbacks) {
+        try {
+          const result = await cb({
+            ...expressionGlobal,
+            cacheKeys: tags,
+          } satisfies CacheKeyExpressionGlobal);
+          // 返回数组时覆盖；否则回调可能已通过 input.cacheKeys 直接修改
+          if (Array.isArray(result)) {
+            tags = result;
+          }
+        } catch (e) {
+          console.error("[RuleEngine] cache_tags_callback execution error:", e);
+        }
+      }
+      if (tags.length > 0) {
+        cacheTags = tags;
+      }
+    } else if (this.globalCacheTagsCallback) {
+      // fallback：无任何匹配规则级的 callback 时，使用全局默认
+      try {
+        const tags = await this.globalCacheTagsCallback({
+          ...expressionGlobal,
+          cacheKeys: [],
+        } satisfies CacheKeyExpressionGlobal);
+        if (Array.isArray(tags) && tags.length > 0) {
+          cacheTags = tags;
+        }
+      } catch (e) {
+        console.error("[RuleEngine] global cache_tags_callback execution error:", e);
+      }
+    }
+
     const cacheKey = makePageCacheKey(ctx.currentSiteId || "unknown", ctx.URL.pathname, ctx.URL.search,
       cachePolicy.cache_key_mode ?? defaultCachePolicy.cache_key_mode);
 
@@ -307,6 +429,7 @@ export class RuleEngineService {
       cache: cachePolicy,
       browser_challenge: browserChallengePolicy,
       cache_key: cacheKey,
+      cache_tags: cacheTags,
     };
   }
 }

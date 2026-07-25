@@ -17,6 +17,8 @@ export interface BrowserChallengePolicy {
 export type Decision = Omit<RuleAction, 'exec'> & {
   /** 根据 cachePolicy.key 计算得出的实际缓存键 */
   cache_key: string;
+  /** 缓存标签（由 cache_tags_callback 链式执行产出） */
+  cache_tags?: string[];
 }
 
 /** 传入规则条件函数的 HTTP 请求上下文 */

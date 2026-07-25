@@ -14,6 +14,7 @@ export interface RuleActionCachePolicy {
   enabled: boolean;
   ttl?: number;
   cache_key_mode?: CacheKeyModeType;
+  cache_tags_callback?: string;
 }
 
 export interface RuleActionBrowserChallengePolicy {

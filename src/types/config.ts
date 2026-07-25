@@ -42,6 +42,7 @@ export interface CacheConfig {
 
   default_ttl: number;
   cache_key_mode: CacheKeyModeType;
+  cache_tags_callback?: string;
   max_entries: number;
   max_body_bytes: number;
   allowed_mimetypes: string[];

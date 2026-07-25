@@ -1,274 +1,128 @@
 import { readFileSync } from "node:fs";
-import { parse as parseTOML } from "smol-toml";
-import { z } from "zod";
-import type { AppConfig, CaptchaConfig, CaptchaProvider, SiteConfig } from "../types/config.ts";
+import { transform } from "esbuild";
+import type { AppConfig, CaptchaConfig, SiteConfig } from "../types/config.ts";
+import type { CacheTagsCallback } from "../types/rule.ts";
 import { env } from "./env.ts";
-import Handlebars from "handlebars";
 
-//#region 规则配置
-const RuleActionReturnSchema = z.object({
-  status: z.number().int().optional(),
-  headers: z.record(z.string()).optional(),
-  text: z.string().optional(),
-  tpl: z
-    .object({
-      id: z.string().min(1),
-      data: z.record(z.any()).optional(),
-    })
-    .optional(),
-});
+// ── esbuild transform + eval a .ts config file ──────────────────────────────
 
-const RuleActionCachePolicySchema = z.object({
-  enabled: z.boolean(),
-  ttl: z.number().int().positive().optional(),
-  cache_key_mode: z.enum(["path+query", "path"]).optional(),
-  cache_tags_callback: z.string().optional(),
-});
+async function loadConfigModule(configPath: string): Promise<Record<string, unknown>> {
+  const source = readFileSync(configPath, "utf-8");
+  const result = await transform(source, {
+    loader: "ts",
+    format: "iife",
+    target: "esnext",
+    sourcemap: "inline",
+  });
 
-const RuleActionBrowserChallengePolicySchema = z.object({
-  enabled: z.boolean(),
-  re_challenge: z.boolean().optional(),
-});
+  const fn = new Function("exports", result.code);
+  const exports: Record<string, unknown> = {};
+  fn(exports);
 
-const RuleSchema = z.object({
-  id: z.string().min(1),
-  description: z.string().optional(),
-  condition: z.string().min(1),
-  skip_test: z.boolean().optional(),
-  last: z.boolean().optional(),
-  block: z.boolean().optional(),
-  return: RuleActionReturnSchema.optional(),
-  cache: RuleActionCachePolicySchema.optional(),
-  browser_challenge: RuleActionBrowserChallengePolicySchema.optional(),
-  exec: z.string().optional(),
-});
-//#endregion
-
-const BackendSchema = z.object({
-  hostname: z.string().optional(),
-  url: z.string().url(),
-  headers: z.record(z.string()).optional(),
-});
-
-const SiteSchema = z.object({
-  hostname: z.union([z.string(), z.array(z.string())]),
-  backend: BackendSchema,
-  rules: z.array(RuleSchema).optional(),
-});
-
-//#region 验证码配置
-const CaptchaProviderSchema = z.enum([
-  "recaptcha",
-  "hcaptcha",
-  "geetest",
-  "turnstile",
-  "funcaptcha",
-  "aliyun",
-  "tencent",
-]);
-
-const RecaptchaProviderSchema = z.object({
-  site_key: z.string(),
-  secret_key: z.string(),
-  api_domain: z.string().optional(),
-  js_domain: z.string().optional(),
-});
-
-const HCaptchaProviderSchema = z.object({
-  site_key: z.string(),
-  secret_key: z.string(),
-});
-
-const GeeTestProviderSchema = z.object({
-  id: z.string(),
-  key: z.string(),
-});
-
-const TurnstileProviderSchema = z.object({
-  site_key: z.string(),
-  secret_key: z.string(),
-});
-
-const FunCaptchaProviderSchema = z.object({
-  public_key: z.string(),
-  private_key: z.string(),
-});
-
-const AliyunProviderSchema = z.object({
-  access_key_id: z.string(),
-  access_key_secret: z.string(),
-});
-
-const TencentProviderSchema = z.object({
-  secret_id: z.string(),
-  secret_key: z.string(),
-});
-
-const CaptchaSchema = z.object({
-  type: CaptchaProviderSchema.optional(),
-  enabled: z.boolean().default(false),
-  recaptcha: RecaptchaProviderSchema.default({ site_key: "", secret_key: "" }),
-  hcaptcha: HCaptchaProviderSchema.default({ site_key: "", secret_key: "" }),
-  geetest: GeeTestProviderSchema.default({ id: "", key: "" }),
-  turnstile: TurnstileProviderSchema.default({ site_key: "", secret_key: "" }),
-  funcaptcha: FunCaptchaProviderSchema.default({ public_key: "", private_key: "" }),
-  aliyun: AliyunProviderSchema.default({ access_key_id: "", access_key_secret: "" }),
-  tencent: TencentProviderSchema.default({ secret_id: "", secret_key: "" }),
-});
-//#endregion
-
-//#region 缓存配置
-const BunRedisConfigSchema = z.object({
-  url: z.string().min(1),
-});
-//#endregion
-
-export const AppConfigSchema = z.object({
-  debug: z.boolean().optional(),
-  templates_dir: z.string().min(1).default("./views"),
-  proxy: z.object({
-    server_port: z.number().int().min(1).max(65535),
-  }),
-  api: z.object({
-    server_port: z.number().int().min(1).max(65535),
-    key: z.string().min(1),
-  }),
-  browser_challenge: z.object({
-    enabled: z.boolean(),
-    cookie_ttl: z.number().int().positive(),
-    challenge_ttl: z.number().int().positive(),
-    tpl: z.string().optional(),
-    secret: z.string().min(1),
-    pow: z.object({
-      difficulty: z.number().int().min(1).max(64),
-    }),
-  }),
-  cache: z.object({
-    enabled: z.boolean(),
-    default_ttl: z.number().int().positive(),
-    provider: z.enum(["memory", "bun+redis"]).default("memory"),
-    bun_redis: BunRedisConfigSchema.optional(),
-    cache_key_mode: z.enum(["path+query", "path"]).default("path+query"),
-    cache_tags_callback: z.string().optional(),
-    max_entries: z.number().int().positive(),
-    max_body_bytes: z.number().int().positive(),
-    allowed_mimetypes: z.array(z.string()).default([
-      "text/html", "application/json", "text/plain", "text/css", "application/javascript", "text/javascript",
-    ]),
-    bypass_after_challenge: z.boolean().default(true),
-  }),
-  captcha: CaptchaSchema.optional(),
-  geoip: z.object({
-    enabled: z.boolean(),
-    db_country_path: z.string().optional(),
-    db_asn_path: z.string().optional(),
-    db_city_path: z.string().optional(),
-  }).optional(),
-  site: z.record(SiteSchema),
-});
-
-/**
- * 校验 active captcha provider：
- * - captcha.enabled=true 时，type 不能为空
- * - captcha.type 对应的 provider 凭据非空。
- */
-function validateActiveProvider(captcha: CaptchaConfig): void {
-  if (!captcha.enabled) return;
-
-  const type = captcha.type;
-  if (!type) {
-    throw new Error(
-      "Config validation failed:\n  field=captcha.type message=captcha.enabled=true 时 type 不能为空",
-    );
+  if (!exports.default || typeof exports.default !== "object") {
+    throw new Error(`Config file must export default { ... }, got ${typeof exports.default}`);
   }
+  return exports.default as Record<string, unknown>;
+}
 
-  const providerCfg = captcha[type];
+// ── Provider credential validation ──────────────────────────────────────────
 
-  // 验证必填凭据非空
-  const emptyFields = getEmptyCredentialFields(type, providerCfg as unknown as Record<string, unknown>);
+const REQUIRED_FIELDS: Record<string, string[]> = {
+  recaptcha: ["site_key", "secret_key"],
+  hcaptcha: ["site_key", "secret_key"],
+  geetest: ["id", "key"],
+  turnstile: ["site_key", "secret_key"],
+  funcaptcha: ["public_key", "private_key"],
+  aliyun: ["access_key_id", "access_key_secret"],
+  tencent: ["secret_id", "secret_key"],
+};
+
+function validateActiveProvider(captcha: CaptchaConfig): void {
+  if (!captcha.enabled || !captcha.type) return;
+  const fields = REQUIRED_FIELDS[captcha.type] ?? [];
+  const cfg = captcha[captcha.type] as unknown as Record<string, unknown>;
+  const emptyFields = fields.filter((f) => !cfg[f]);
   if (emptyFields.length > 0) {
     throw new Error(
       `Config validation failed:\n${emptyFields
-        .map((f) => `  field=captcha.${type}.${f} message=Required credential is empty`)
+        .map((f) => `  field=captcha.${captcha.type}.${f} message=Required credential is empty`)
         .join("\n")}`,
     );
   }
 }
 
-function getEmptyCredentialFields(
-  provider: CaptchaProvider,
-  cfg: Record<string, unknown>,
-): string[] {
-  const requiredFields: Record<CaptchaProvider, string[]> = {
-    recaptcha: ["site_key", "secret_key"],
-    hcaptcha: ["site_key", "secret_key"],
-    geetest: ["id", "key"],
-    turnstile: ["site_key", "secret_key"],
-    funcaptcha: ["public_key", "private_key"],
-    aliyun: ["access_key_id", "access_key_secret"],
-    tencent: ["secret_id", "secret_key"],
-  };
-  const fields = requiredFields[provider] ?? [];
-  return fields.filter((f) => !cfg[f]);
-}
+// ── Main loader ─────────────────────────────────────────────────────────────
 
-/**
- * 从 TOML 文件加载并校验应用配置。
- * 校验失败时抛出错误，拒绝启动。
- */
-export function loadConfig(): AppConfig {
-  const raw = readFileSync(env.CONFIG_PATH, "utf-8");
-  const parsed = parseTOML(raw);
-  const result = AppConfigSchema.safeParse(parsed);
+export async function loadConfig(): Promise<AppConfig> {
+  const raw = await loadConfigModule(env.CONFIG_PATH);
 
-  if (!result.success) {
-    const issues = result.error.issues
-      .map((i) => `  field=${i.path.join(".")} message=${i.message}`)
-      .join("\n");
-    throw new Error(`Config validation failed:\n${issues}`);
-  }
+  const proxy = raw.proxy as Record<string, unknown>;
+  const api = raw.api as Record<string, unknown>;
+  const bc = raw.browser_challenge as Record<string, unknown>;
+  const cacheCfg = raw.cache as Record<string, unknown>;
+  const bcPow = (bc.pow ?? {}) as Record<string, unknown>;
+  const bunRedis = (cacheCfg.bun_redis ?? {}) as Record<string, unknown>;
 
-  const data = result.data;
+  const debug = typeof raw.debug === "boolean" ? raw.debug : undefined;
+  const templates_dir = typeof raw.templates_dir === "string" ? raw.templates_dir : "./views";
 
-  // 预渲染所有 Handlebars 模板
-  let sites: Record<string, SiteConfig> = {};
-  for (const [name, site] of Object.entries(data.site)) {
-    const headerTemplates: Record<string, HandlebarsTemplateDelegate> = {};
-    for (const [key, tpl] of Object.entries(site.backend.headers ?? {})) {
-      headerTemplates[key] = Handlebars.compile(tpl);
-    }
+  // 预处理站点
+  const rawSites = raw.sites as Record<string, Record<string, unknown>>;
+  const sites: Record<string, SiteConfig> = {};
 
+  for (const [name, site] of Object.entries(rawSites)) {
+    const backend = site.backend as Record<string, unknown>;
     let hostname = site.hostname;
     if (Array.isArray(hostname)) {
-      hostname = hostname.map((h) => h.toLowerCase());
-    } else {
+      hostname = hostname.map((h: string) => h.toLowerCase());
+    } else if (typeof hostname === "string") {
       hostname = hostname.toLowerCase();
     }
 
     sites[name] = {
-      ...site,
-      hostname,
+      hostname: hostname as string | string[],
       backend: {
-        ...site.backend,
-        headers: headerTemplates,
+        url: backend.url as string,
+        hostname: backend.hostname as string | undefined,
+        headers: (backend.headers ?? {}) as Record<string, string | ((input: any) => string | null | undefined)>,
       },
-    };
+      rules: (site.rules ?? []) as SiteConfig["rules"],
+    } as SiteConfig;
   }
 
-  // 校验 active captcha provider（captcha 节存在时）
-  if (data.captcha) {
-    validateActiveProvider(data.captcha);
-  }
+  // Captcha 校验
+  const captcha = raw.captcha as CaptchaConfig | undefined;
+  if (captcha) validateActiveProvider(captcha);
 
   return {
-    debug: data.debug ?? false,
-    templates_dir: data.templates_dir ?? "./views",
-    proxy: data.proxy,
-    api: data.api,
-    browser_challenge: data.browser_challenge,
-    cache: data.cache,
-    captcha: data.captcha,
-    geoip: data.geoip,
+    debug,
+    templates_dir,
+    proxy: { server_port: proxy.server_port as number },
+    api: { server_port: api.server_port as number, key: api.key as string },
+    browser_challenge: {
+      enabled: bc.enabled as boolean,
+      tpl: bc.tpl as string | undefined,
+      cookie_ttl: bc.cookie_ttl as number,
+      challenge_ttl: bc.challenge_ttl as number,
+      secret: bc.secret as string,
+      pow: { difficulty: bcPow.difficulty as number },
+    },
+    cache: {
+      enabled: cacheCfg.enabled as boolean,
+      provider: (cacheCfg.provider ?? "memory") as "memory" | "bun+redis",
+      bun_redis: bunRedis.url ? { url: bunRedis.url as string } : undefined,
+      default_ttl: cacheCfg.default_ttl as number,
+      cache_key_mode: (cacheCfg.cache_key_mode ?? "path+query") as "path" | "path+query",
+      cache_tags_callback: cacheCfg.cache_tags_callback as CacheTagsCallback | undefined,
+      max_entries: cacheCfg.max_entries as number,
+      max_body_bytes: cacheCfg.max_body_bytes as number,
+      allowed_mimetypes: (cacheCfg.allowed_mimetypes ?? [
+        "text/html", "application/json", "text/plain", "text/css", "application/javascript", "text/javascript",
+      ]) as string[],
+      bypass_after_challenge: (cacheCfg.bypass_after_challenge ?? true) as boolean,
+    },
+    captcha,
+    geoip: raw.geoip as AppConfig["geoip"],
     sites,
   };
 }

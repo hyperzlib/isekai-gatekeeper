@@ -4,6 +4,11 @@ import type Koa from "koa";
 import type { AppConfig, SiteConfig } from "../types/config.ts";
 import type { CacheService } from "./cacheService.ts";
 import type { Decision } from "../types/decision.ts";
+import type { RuleInput, HeaderBuilder } from "../types/rule.ts";
+import { RulePresets } from "../utils/RulePresets.ts";
+import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
+import { ruleExpressionTools } from "../utils/RuleTools.ts";
+import { toCloudflareHttp } from "../utils/http.ts";
 
 /**
  * 将 Node.js Readable stream 转为 Web ReadableStream，
@@ -38,24 +43,23 @@ type PageCacheEntry = {
 };
 
 /**
- * 渲染后端请求头模板（支持 Handlebars 语法）。
+ * 渲染后端请求头。string 直接使用，函数接收 RuleInput 上下文后返回值。
+ * 函数返回 null/undefined 则跳过该 header。
  */
 function renderHeaders(
-  headerTemplates: Record<string, HandlebarsTemplateDelegate>,
-  ctx: Koa.Context,
+  headerTemplates: Record<string, string | HeaderBuilder>,
+  expressionGlobal: RuleInput,
 ): Record<string, string> {
-  const tplCtx = {
-    http: {
-      request: {
-        headers: Object.fromEntries(
-          Object.entries(ctx.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : (v ?? "")]),
-        ),
-      },
-    },
-  };
   const result: Record<string, string> = {};
-  for (const [key, render] of Object.entries(headerTemplates)) {
-    result[key] = render(tplCtx);
+  for (const [key, value] of Object.entries(headerTemplates)) {
+    if (typeof value === "function") {
+      const resolved = value(expressionGlobal);
+      if (resolved != null) {
+        result[key] = resolved;
+      }
+    } else {
+      result[key] = value;
+    }
   }
   return result;
 }
@@ -153,7 +157,15 @@ export class ProxyService {
       forwardHeaders["host"] = site.backend.hostname;
     }
     if (site.backend.headers) {
-      Object.assign(forwardHeaders, renderHeaders(site.backend.headers, ctx));
+      const exprGlobal = {
+        ctx,
+        http: toCloudflareHttp(ctx),
+        presets: new RulePresets(ctx),
+        rateLimit: new RuleRateLimit(ctx),
+        state: ctx.state.ruleEngineState ?? {},
+        ...ruleExpressionTools,
+      };
+      Object.assign(forwardHeaders, renderHeaders(site.backend.headers, exprGlobal as unknown as RuleInput));
     }
 
     // 请求体转发：multipart（文件上传）→ 流式转发；JSON/form → 字符串化

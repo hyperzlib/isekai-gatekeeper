@@ -10,7 +10,7 @@ import { ServiceContainer } from "./types/service.ts";
 import { RateLimitService } from "./services/rateLimitService.ts";
 
 async function main() {
-  const cfg = loadConfig();
+  const cfg = await loadConfig();
 
   console.log("[boot] Config loaded.");
 

@@ -1,12 +1,12 @@
 import { CacheKeyModeType } from "./cache";
-import { RuleConfig } from "./rule";
+import type { RuleConfig, CacheTagsCallback, HeaderBuilder } from "./rule";
 
 /** 站点后端配置 */
 export interface BackendConfig {
   url: string;
   /** 可选，默认为 Host header，用于发送给同一个 Nginx 后端 */
   hostname?: string;
-  headers?: Record<string, HandlebarsTemplateDelegate<any>>;
+  headers?: Record<string, HeaderBuilder | string>;
 }
 
 /** 站点配置 */
@@ -42,7 +42,7 @@ export interface CacheConfig {
 
   default_ttl: number;
   cache_key_mode: CacheKeyModeType;
-  cache_tags_callback?: string;
+  cache_tags_callback?: CacheTagsCallback;
   max_entries: number;
   max_body_bytes: number;
   allowed_mimetypes: string[];

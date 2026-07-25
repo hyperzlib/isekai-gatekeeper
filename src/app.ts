@@ -24,7 +24,7 @@ export async function createProxyApp(
   app.context.appConfig = cfg;
 
   // 加载规则引擎
-  const ruleEngine = new RuleEngineService(app, cfg);
+  const ruleEngine = new RuleEngineService(cfg);
   await ruleEngine.init();
   console.log("[boot] Rules compiled successfully.");
   app.context.ruleEngine = ruleEngine;

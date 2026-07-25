@@ -12,7 +12,7 @@ const API_PORT = 19081;
 const UPSTREAM_PORT = 19090;
 
 const PROJECT_ROOT = path.resolve(import.meta.dir, "..", "..");
-const TEST_CONFIG_PATH = path.join(PROJECT_ROOT, "tests", "config.toml");
+const TEST_CONFIG_PATH = path.join(PROJECT_ROOT, "tests", "config.ts");
 
 function withTimeout<T>(promise: Promise<T>, ms: number, reason: string): Promise<T> {
   return new Promise((resolve, reject) => {

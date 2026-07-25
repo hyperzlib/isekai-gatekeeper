@@ -2,9 +2,9 @@ import type Koa from "koa";
 import { clearChallengePassCookie } from "../services/tokenService.ts";
 import { renderChallengePage } from "../controllers/challengeController.ts";
 import { CHALLENGE_PATH_PREFIX } from "../routes/challengeRoutes.ts";
-import { RuleActionReturn } from "../types/rule.ts";
+import type { ResolvedReturn } from "../types/decision.ts";
 
-export const handleReturnAction = (ctx: Koa.Context, returnData: RuleActionReturn) => {
+export const handleReturnAction = (ctx: Koa.Context, returnData: ResolvedReturn) => {
   ctx.status = returnData.status ?? 200;
   if (returnData.headers) {
     for (const [k, v] of Object.entries(returnData.headers)) {

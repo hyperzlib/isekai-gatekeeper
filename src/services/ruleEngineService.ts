@@ -3,6 +3,7 @@ import type { SiteConfig, AppConfig } from "../types/config.ts";
 import type {
   RuleActionCachePolicy, RuleActionReturn, RuleConfig,
   RuleCondition, RuleExec, CacheTagsCallback, RuleInput, CacheKeyRuleInput as CacheTagRuleInput,
+  RuleTrace,
 } from "../types/rule.ts";
 import type { Decision, CachePolicy, BrowserChallengePolicy, ResolvedReturn } from "../types/decision.ts";
 import { RulePresets } from "../utils/RulePresets.ts";
@@ -32,6 +33,10 @@ type CacheTagExpressionGlobal = ExpressionGlobal & CacheTagRuleInput & {
 interface CompiledSite {
   rules: RuleConfig[];
   siteConfig: SiteConfig;
+}
+
+export interface RuleEvaluateOptions {
+  trace?: RuleTrace;
 }
 
 export class RuleEngineService {
@@ -64,7 +69,8 @@ export class RuleEngineService {
   }
 
   /** 对请求上下文执行 multi-match 规则评估，返回合并决策。 */
-  async evaluate(ctx: Context): Promise<Decision> {
+  async evaluate(ctx: Context, options: RuleEvaluateOptions = {}): Promise<Decision> {
+    const trace = options.trace;
     const hostname = ctx.request.headers["host"] ?? "";
     const entry = this.compiledSites.get(hostname);
 
@@ -78,20 +84,30 @@ export class RuleEngineService {
       enabled: this.appConfig.browser_challenge.enabled,
     };
 
+    trace?.({
+      type: "site",
+      hostname,
+      matched: !!entry,
+      siteHostname: entry?.siteConfig.hostname,
+    });
+
     if (!entry) {
-      return {
+      const decision: Decision = {
         block: false,
         cache: defaultCachePolicy,
         browser_challenge: defaultChallenge,
         cache_key: makePageCacheKey(ctx.currentSiteId || "unknown", ctx.URL.pathname, ctx.URL.search, defaultCachePolicy.cache_key_mode),
       };
+      trace?.({ type: "default_decision", decision });
+      trace?.({ type: "final_decision", decision });
+      return decision;
     }
 
     let isBlocked = false;
     let returnData: ResolvedReturn | undefined;
     let cachePolicy: RuleActionCachePolicy = { ...defaultCachePolicy };
     let browserChallengePolicy: BrowserChallengePolicy = { ...defaultChallenge };
-    const matchedCallbacks: CacheTagsCallback[] = [];
+    const matchedCallbacks: { ruleId: string; callback: CacheTagsCallback }[] = [];
 
     ctx.state.ruleEngineState ??= {};
     const expressionGlobal: ExpressionGlobal = {
@@ -106,9 +122,12 @@ export class RuleEngineService {
     if (entry.rules.length > 0) {
       for (const rule of entry.rules) {
         let matches: boolean;
+        trace?.({ type: "rule_condition_start", ruleId: rule.id, description: rule.description });
         try {
           matches = await rule.condition(expressionGlobal);
-        } catch {
+          trace?.({ type: "rule_condition_result", ruleId: rule.id, matched: matches });
+        } catch (e) {
+          trace?.({ type: "rule_condition_error", ruleId: rule.id, error: e });
           continue;
         }
         if (!matches) continue;
@@ -118,15 +137,18 @@ export class RuleEngineService {
         }
 
         if (rule.exec) {
+          trace?.({ type: "rule_exec_start", ruleId: rule.id });
           try {
             await rule.exec(expressionGlobal);
+            trace?.({ type: "rule_exec_done", ruleId: rule.id });
           } catch (e) {
+            trace?.({ type: "rule_exec_error", ruleId: rule.id, error: e });
             console.log(`Error executing custom script in rule ${rule.id}:`, e);
           }
         }
 
         if (rule.cache?.cache_tags_callback) {
-          matchedCallbacks.push(rule.cache.cache_tags_callback);
+          matchedCallbacks.push({ ruleId: rule.id, callback: rule.cache.cache_tags_callback });
         }
 
         // block 与 return 都是终止动作
@@ -152,6 +174,18 @@ export class RuleEngineService {
           }
           cachePolicy = { enabled: false, ttl: 1, cache_key_mode: "path" as CacheKeyModeType };
           browserChallengePolicy = { enabled: false };
+          trace?.({
+            type: "rule_action",
+            ruleId: rule.id,
+            action: {
+              block: rule.block,
+              return: rule.return,
+              cache: rule.cache,
+              browser_challenge: rule.browser_challenge,
+              last: rule.last,
+            },
+          });
+          trace?.({ type: "rule_stop", ruleId: rule.id, reason: rule.block ? "block" : "return" });
           break;
         }
 
@@ -164,7 +198,22 @@ export class RuleEngineService {
           browserChallengePolicy = { ...browserChallengePolicy, ...rule.browser_challenge };
         }
 
-        if (rule.last) break;
+        trace?.({
+          type: "rule_action",
+          ruleId: rule.id,
+          action: {
+            block: rule.block,
+            return: rule.return,
+            cache: rule.cache,
+            browser_challenge: rule.browser_challenge,
+            last: rule.last,
+          },
+        });
+
+        if (rule.last) {
+          trace?.({ type: "rule_stop", ruleId: rule.id, reason: "last" });
+          break;
+        }
       }
     }
 
@@ -172,23 +221,29 @@ export class RuleEngineService {
     let cacheTags: string[] | undefined;
     if (matchedCallbacks.length > 0) {
       let tags: string[] = [];
-      for (const cb of matchedCallbacks) {
+      for (const { ruleId, callback } of matchedCallbacks) {
         try {
-          const result = await cb({ ...expressionGlobal, cacheTags: tags } as CacheTagExpressionGlobal);
+          trace?.({ type: "cache_tags_callback_start", source: "rule", ruleId });
+          const result = await callback({ ...expressionGlobal, cacheTags: tags } as CacheTagExpressionGlobal);
           if (Array.isArray(result)) tags = result;
+          trace?.({ type: "cache_tags_callback_result", source: "rule", ruleId, tags });
         } catch (e) {
+          trace?.({ type: "cache_tags_callback_error", source: "rule", ruleId, error: e });
           console.error("[RuleEngine] cache_tags_callback execution error:", e);
         }
       }
       if (tags.length > 0) cacheTags = tags;
     } else if (this.appConfig.cache.cache_tags_callback) {
       try {
+        trace?.({ type: "cache_tags_callback_start", source: "global" });
         const tags = await this.appConfig.cache.cache_tags_callback({
           ...expressionGlobal,
           cacheTags: [],
         } as CacheTagExpressionGlobal);
         if (Array.isArray(tags) && tags.length > 0) cacheTags = tags;
+        trace?.({ type: "cache_tags_callback_result", source: "global", tags: Array.isArray(tags) ? tags : [] });
       } catch (e) {
+        trace?.({ type: "cache_tags_callback_error", source: "global", error: e });
         console.error("[RuleEngine] global cache_tags_callback execution error:", e);
       }
     }
@@ -200,7 +255,7 @@ export class RuleEngineService {
       cachePolicy.cache_key_mode ?? defaultCachePolicy.cache_key_mode,
     );
 
-    return {
+    const decision: Decision = {
       block: isBlocked,
       return: returnData,
       cache: cachePolicy,
@@ -208,5 +263,7 @@ export class RuleEngineService {
       cache_key: cacheKey,
       cache_tags: cacheTags,
     };
+    trace?.({ type: "final_decision", decision });
+    return decision;
   }
 }

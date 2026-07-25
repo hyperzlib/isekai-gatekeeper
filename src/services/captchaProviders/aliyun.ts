@@ -36,7 +36,7 @@ export const aliyunAdapter: CaptchaProviderAdapter = {
   name: "aliyun",
 
   async verify(config: CaptchaConfig, req: CaptchaVerifyRequest): Promise<CaptchaVerifyResult> {
-    const cfg = config.aliyun;
+    const cfg = config.aliyun!;
     if (!cfg.access_key_id || !cfg.access_key_secret) {
       throw new CaptchaError(
         "Aliyun access_key_id or access_key_secret is empty",

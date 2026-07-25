@@ -31,6 +31,24 @@ export type RuleExec = (input: RuleInput) => void | Promise<void>;
 export type CacheTagsCallback = (input: CacheKeyRuleInput) => string[] | Promise<string[]>;
 export type HeaderBuilder = (input: RuleInput) => string | null | undefined;
 
+export type RuleTraceEvent =
+  | { type: "site"; hostname: string; matched: boolean; siteHostname?: string | string[] }
+  | { type: "default_decision"; decision: unknown }
+  | { type: "rule_condition_start"; ruleId: string; description?: string }
+  | { type: "rule_condition_result"; ruleId: string; matched: boolean }
+  | { type: "rule_condition_error"; ruleId: string; error: unknown }
+  | { type: "rule_exec_start"; ruleId: string }
+  | { type: "rule_exec_done"; ruleId: string }
+  | { type: "rule_exec_error"; ruleId: string; error: unknown }
+  | { type: "rule_action"; ruleId: string; action: Pick<RuleAction, "block" | "return" | "cache" | "browser_challenge"> & { last?: boolean } }
+  | { type: "rule_stop"; ruleId: string; reason: "block" | "return" | "last" }
+  | { type: "cache_tags_callback_start"; source: "rule" | "global"; ruleId?: string }
+  | { type: "cache_tags_callback_result"; source: "rule" | "global"; ruleId?: string; tags: string[] }
+  | { type: "cache_tags_callback_error"; source: "rule" | "global"; ruleId?: string; error: unknown }
+  | { type: "final_decision"; decision: unknown };
+
+export type RuleTrace = (event: RuleTraceEvent) => void;
+
 // ── Rule action types ───────────────────────────────────────────────────────
 
 export interface RuleActionReturn {

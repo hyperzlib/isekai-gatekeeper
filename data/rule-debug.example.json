@@ -1,0 +1,44 @@
+{
+  "requests": [
+    {
+      "name": "Home page",
+      "method": "GET",
+      "url": "/",
+      "host": "isekai.cn",
+      "headers": {
+        "user-agent": "Mozilla/5.0 rule-debug",
+        "accept": "text/html"
+      },
+      "cookies": {},
+      "clientIp": "127.0.0.1",
+      "validatedClientId": null,
+      "geoip": {
+        "countryCode": "CN",
+        "asn": 64512
+      },
+      "bodyContentType": "",
+      "bodyLength": 0
+    },
+    {
+      "name": "Authenticated wiki page",
+      "method": "GET",
+      "url": "/wiki/Main_Page?action=view",
+      "host": "isekai.cn",
+      "headers": {
+        "user-agent": "Mozilla/5.0 rule-debug",
+        "accept": "text/html"
+      },
+      "cookies": {
+        "isekaiToken": "debug-token"
+      },
+      "clientIp": "127.0.0.1",
+      "validatedClientId": "debug-client",
+      "geoip": {
+        "countryCode": "CN",
+        "asn": 64512
+      },
+      "bodyContentType": "",
+      "bodyLength": 0
+    }
+  ]
+}

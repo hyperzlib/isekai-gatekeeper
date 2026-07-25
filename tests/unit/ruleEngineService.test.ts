@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import Koa, { Context } from "koa";
 import { RuleEngineService } from "../../src/services/ruleEngineService.ts";
 import type { AppConfig, SiteConfig } from "../../src/types/config.ts";
-import type { RuleConfig, RuleInput } from "../../src/types/rule.ts";
+import type { RuleConfig, RuleInput, RuleTraceEvent } from "../../src/types/rule.ts";
 import { IncomingMessage } from "http";
 import { ServerResponse } from "http";
 import { makePageCacheKey, PAGE_CACHE_KEY_PREFIX } from "../../src/utils/cache.ts";
@@ -253,6 +253,85 @@ describe("RuleEngineService - cache_key generation", () => {
     const a = await svc.evaluate(makeCtx("/page?x=1"));
     const b = await svc.evaluate(makeCtx("/page?x=2"));
     expect(a.cache_key).toBe(b.cache_key);
+  });
+});
+
+// ─── evaluate：trace ─────────────────────────────────────────────────────────
+
+describe("RuleEngineService - trace", () => {
+  it("emits trace events for rule matching, actions, cache tags, and final decision", async () => {
+    const svc = new RuleEngineService(makeConfig([
+      {
+        id: "miss",
+        condition: falseCond,
+      },
+      {
+        id: "hit",
+        description: "trace hit",
+        condition: trueCond,
+        exec: noop,
+        cache: {
+          enabled: true,
+          ttl: 120,
+          cache_tags_callback: ({ cacheTags }) => [...cacheTags, "tag:hit"],
+        },
+        last: true,
+      },
+    ]));
+    await svc.init();
+
+    const events: RuleTraceEvent[] = [];
+    const dec = await svc.evaluate(makeCtx("/trace"), {
+      trace: (event) => events.push(event),
+    });
+
+    expect(dec.cache?.enabled).toBe(true);
+    expect(dec.cache_tags).toEqual(["tag:hit"]);
+    expect(events.map((event) => event.type)).toContain("site");
+    expect(events).toContainEqual({ type: "rule_condition_result", ruleId: "miss", matched: false });
+    expect(events).toContainEqual({ type: "rule_condition_result", ruleId: "hit", matched: true });
+    expect(events).toContainEqual({ type: "rule_exec_start", ruleId: "hit" });
+    expect(events).toContainEqual({ type: "rule_exec_done", ruleId: "hit" });
+    expect(events).toContainEqual({ type: "rule_stop", ruleId: "hit", reason: "last" });
+    expect(events).toContainEqual({ type: "cache_tags_callback_result", source: "rule", ruleId: "hit", tags: ["tag:hit"] });
+    expect(events.at(-1)?.type).toBe("final_decision");
+  });
+
+  it("traces condition and exec errors without changing existing fault tolerance", async () => {
+    const svc = new RuleEngineService(makeConfig([
+      {
+        id: "bad-condition",
+        condition: () => {
+          throw new Error("condition boom");
+        },
+      },
+      {
+        id: "bad-exec",
+        condition: trueCond,
+        exec: () => {
+          throw new Error("exec boom");
+        },
+        cache: { enabled: true, ttl: 99 },
+      },
+    ]));
+    await svc.init();
+
+    const events: RuleTraceEvent[] = [];
+    const originalLog = console.log;
+    console.log = () => {};
+    const dec = await (async () => {
+      try {
+        return await svc.evaluate(makeCtx("/trace-errors"), {
+          trace: (event) => events.push(event),
+        });
+      } finally {
+        console.log = originalLog;
+      }
+    })();
+
+    expect(dec.cache?.ttl).toBe(99);
+    expect(events.some((event) => event.type === "rule_condition_error" && event.ruleId === "bad-condition")).toBe(true);
+    expect(events.some((event) => event.type === "rule_exec_error" && event.ruleId === "bad-exec")).toBe(true);
   });
 });
 

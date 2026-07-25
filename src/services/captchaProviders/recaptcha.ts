@@ -13,7 +13,7 @@ import { CaptchaError, CaptchaErrorKind } from "../captchaService.ts";
 const TIMEOUT_MS = 5000;
 
 const getVerifyUrl = (config: CaptchaConfig): string => {
-    const cfg = config.recaptcha;
+    const cfg = config.recaptcha!;
     const api_domain = cfg.api_domain ?? "www.google.com";
     return `https://${api_domain}/recaptcha/api/siteverify`;
   }
@@ -22,7 +22,7 @@ export const recaptchaAdapter: CaptchaProviderAdapter = {
   name: "recaptcha",
 
   async verify(config: CaptchaConfig, req: CaptchaVerifyRequest): Promise<CaptchaVerifyResult> {
-    const cfg = config.recaptcha;
+    const cfg = config.recaptcha!;
     if (!cfg.secret_key) {
       throw new CaptchaError("reCAPTCHA secret_key is empty", CaptchaErrorKind.Config);
     }
@@ -64,7 +64,7 @@ export const recaptchaAdapter: CaptchaProviderAdapter = {
     } catch (err) {
       if (err instanceof CaptchaError) throw err;
       if ((err as Error).name === "AbortError") {
-        throw new CaptchaError("reCAPTCHA request timed out, domain: " + (config.recaptcha.api_domain ?? "www.google.com"), CaptchaErrorKind.Network);
+        throw new CaptchaError("reCAPTCHA request timed out, domain: " + (config.recaptcha!.api_domain ?? "www.google.com"), CaptchaErrorKind.Network);
       }
       throw new CaptchaError(
         `reCAPTCHA network error: ${(err as Error).message}`,

@@ -3,7 +3,6 @@ import { transform } from "esbuild";
 import type { AppConfig, CaptchaConfig, SiteConfig } from "../types/config.ts";
 import type { CacheTagsCallback } from "../types/rule.ts";
 import { env } from "./env.ts";
-import { fa } from "zod/v4/locales";
 
 // ── esbuild transform + eval a .ts config file ──────────────────────────────
 
@@ -54,8 +53,8 @@ function validateActiveProvider(captcha: CaptchaConfig): void {
 
 // ── Main loader ─────────────────────────────────────────────────────────────
 
-export async function loadConfig(): Promise<AppConfig> {
-  const raw = await loadConfigModule(env.CONFIG_PATH);
+export async function loadConfig(configPath = env.CONFIG_PATH): Promise<AppConfig> {
+  const raw = await loadConfigModule(configPath);
 
   const proxy = raw.proxy as Record<string, unknown>;
   const api = raw.api as Record<string, unknown>;

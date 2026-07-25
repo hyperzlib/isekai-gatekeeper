@@ -17,7 +17,7 @@ export const funcaptchaAdapter: CaptchaProviderAdapter = {
   name: "funcaptcha",
 
   async verify(config: CaptchaConfig, req: CaptchaVerifyRequest): Promise<CaptchaVerifyResult> {
-    const cfg = config.funcaptcha;
+    const cfg = config.funcaptcha!;
     if (!cfg.private_key) {
       throw new CaptchaError("FunCaptcha private_key is empty", CaptchaErrorKind.Config);
     }

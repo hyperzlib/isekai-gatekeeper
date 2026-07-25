@@ -24,7 +24,7 @@ export const geetestAdapter: CaptchaProviderAdapter = {
   name: "geetest",
 
   async verify(config: CaptchaConfig, req: CaptchaVerifyRequest): Promise<CaptchaVerifyResult> {
-    const cfg = config.geetest;
+    const cfg = config.geetest!;
     if (!cfg.id || !cfg.key) {
       throw new CaptchaError("GeeTest id or key is empty", CaptchaErrorKind.Config);
     }

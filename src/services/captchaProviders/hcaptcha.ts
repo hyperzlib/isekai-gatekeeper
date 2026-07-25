@@ -17,7 +17,7 @@ export const hcaptchaAdapter: CaptchaProviderAdapter = {
   name: "hcaptcha",
 
   async verify(config: CaptchaConfig, req: CaptchaVerifyRequest): Promise<CaptchaVerifyResult> {
-    const cfg = config.hcaptcha;
+    const cfg = config.hcaptcha!;
     if (!cfg.secret_key) {
       throw new CaptchaError("hCaptcha secret_key is empty", CaptchaErrorKind.Config);
     }

@@ -17,7 +17,7 @@ export const turnstileAdapter: CaptchaProviderAdapter = {
   name: "turnstile",
 
   async verify(config: CaptchaConfig, req: CaptchaVerifyRequest): Promise<CaptchaVerifyResult> {
-    const cfg = config.turnstile;
+    const cfg = config.turnstile!;
     if (!cfg.secret_key) {
       throw new CaptchaError("Turnstile secret_key is empty", CaptchaErrorKind.Config);
     }

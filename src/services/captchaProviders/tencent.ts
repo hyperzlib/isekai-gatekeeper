@@ -35,7 +35,7 @@ export const tencentAdapter: CaptchaProviderAdapter = {
   name: "tencent",
 
   async verify(config: CaptchaConfig, req: CaptchaVerifyRequest): Promise<CaptchaVerifyResult> {
-    const cfg = config.tencent;
+    const cfg = config.tencent!;
     if (!cfg.secret_id || !cfg.secret_key) {
       throw new CaptchaError(
         "Tencent secret_id or secret_key is empty",

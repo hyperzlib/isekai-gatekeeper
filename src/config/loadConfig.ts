@@ -3,6 +3,7 @@ import { transform } from "esbuild";
 import type { AppConfig, CaptchaConfig, SiteConfig } from "../types/config.ts";
 import type { CacheTagsCallback } from "../types/rule.ts";
 import { env } from "./env.ts";
+import { fa } from "zod/v4/locales";
 
 // ── esbuild transform + eval a .ts config file ──────────────────────────────
 
@@ -10,19 +11,19 @@ async function loadConfigModule(configPath: string): Promise<Record<string, unkn
   const source = readFileSync(configPath, "utf-8");
   const result = await transform(source, {
     loader: "ts",
-    format: "iife",
+    format: "cjs",
     target: "esnext",
     sourcemap: "inline",
   });
 
-  const fn = new Function("exports", result.code);
-  const exports: Record<string, unknown> = {};
-  fn(exports);
-
-  if (!exports.default || typeof exports.default !== "object") {
-    throw new Error(`Config file must export default { ... }, got ${typeof exports.default}`);
+  const fn = new Function("module", result.code);
+  const module_: { exports: Record<string, unknown> } = { exports: {} };
+  fn(module_);
+  
+  if (!module_.exports.default || typeof module_.exports.default !== "object") {
+    throw new Error(`Config file must export default { ... }, got ${typeof module_.exports.default}`);
   }
-  return exports.default as Record<string, unknown>;
+  return module_.exports.default as Record<string, unknown>;
 }
 
 // ── Provider credential validation ──────────────────────────────────────────
@@ -40,7 +41,7 @@ const REQUIRED_FIELDS: Record<string, string[]> = {
 function validateActiveProvider(captcha: CaptchaConfig): void {
   if (!captcha.enabled || !captcha.type) return;
   const fields = REQUIRED_FIELDS[captcha.type] ?? [];
-  const cfg = captcha[captcha.type] as unknown as Record<string, unknown>;
+  const cfg = (captcha[captcha.type] ?? {}) as unknown as Record<string, unknown>;
   const emptyFields = fields.filter((f) => !cfg[f]);
   if (emptyFields.length > 0) {
     throw new Error(

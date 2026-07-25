@@ -1,6 +1,8 @@
 import type { Context } from "koa";
 import type { CloudflareHttp } from "./cloudflare";
 import { CacheKeyModeType } from "./cache";
+import { RulePresets } from "../utils/RulePresets";
+import { RuleRateLimit } from "../utils/RuleRateLimit";
 
 // ── Rule input types (injected at runtime) ──────────────────────────────────
 
@@ -8,8 +10,8 @@ import { CacheKeyModeType } from "./cache";
 export interface RuleInput {
   ctx: Context;
   http: CloudflareHttp;
-  presets: Record<string, unknown> & { isCommonSearchEngineBot: boolean };
-  rateLimit: Record<string, unknown>;
+  presets: RulePresets;
+  rateLimit: RuleRateLimit;
   state: Record<string, any>;
   matchGlob: (str: string, pattern: string | string[]) => boolean;
   match: (str: string, pattern: RegExp | RegExp[]) => boolean;

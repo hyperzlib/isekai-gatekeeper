@@ -154,4 +154,4 @@ dist/
 !/data/geoip/README.md
 
 # Config files
-config.toml
+config.ts

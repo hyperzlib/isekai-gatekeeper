@@ -99,13 +99,13 @@ export interface TencentProviderConfig {
 export interface CaptchaConfig {
   enabled: boolean;
   type?: CaptchaProvider;
-  recaptcha: RecaptchaProviderConfig;
-  hcaptcha: HCaptchaProviderConfig;
-  geetest: GeeTestProviderConfig;
-  turnstile: TurnstileProviderConfig;
-  funcaptcha: FunCaptchaProviderConfig;
-  aliyun: AliyunProviderConfig;
-  tencent: TencentProviderConfig;
+  recaptcha?: RecaptchaProviderConfig;
+  hcaptcha?: HCaptchaProviderConfig;
+  geetest?: GeeTestProviderConfig;
+  turnstile?: TurnstileProviderConfig;
+  funcaptcha?: FunCaptchaProviderConfig;
+  aliyun?: AliyunProviderConfig;
+  tencent?: TencentProviderConfig;
 }
 //#endregion
 

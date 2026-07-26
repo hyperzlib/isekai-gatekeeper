@@ -1,9 +1,11 @@
 import { gunzipSync, brotliDecompressSync, inflateSync } from "node:zlib";
 import { Readable } from "node:stream";
+import type { OutgoingHttpHeaders } from "node:http";
 import type Koa from "koa";
 import type { AppConfig, SiteConfig } from "../types/config.ts";
 import type { CacheService } from "./cacheService.ts";
 import type { Decision } from "../types/decision.ts";
+import type { CachedResponse } from "../types/cache.ts";
 import type { RuleInput, HeaderBuilder } from "../types/rule.ts";
 import { RulePresets } from "../utils/RulePresets.ts";
 import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
@@ -33,15 +35,6 @@ function nodeStreamToReadableStream(nodeStream: Readable): ReadableStream<Uint8A
     },
   });
 }
-
-type PageCacheEntry = {
-  status: number;
-  headers: Record<string, string[]>;
-  body: string;
-  cachedAt: number;
-  ttl: number;
-  tags?: string[];
-};
 
 /**
  * 渲染后端请求头。string 直接使用，函数接收 RuleInput 上下文后返回值。
@@ -90,6 +83,21 @@ function isTextContentType(contentType: string): boolean {
   );
 }
 
+function sendCachedResponse(ctx: Koa.Context, cached: CachedResponse, age: number): void {
+  const cacheAge = Math.floor(age / 1000).toString();
+  const headers: OutgoingHttpHeaders = {
+    ...cached.headers,
+    "x-cache": "HIT",
+    "x-cache-age": cacheAge,
+    "age": cacheAge,
+    "expires": new Date(cached.cachedAt + cached.ttl * 1000).toUTCString(),
+  };
+
+  ctx.respond = false;
+  ctx.res.writeHead(cached.status, headers);
+  ctx.res.end(cached.body);
+}
+
 export class ProxyService {
   private readonly cacheService: CacheService;
   private readonly appConfig: AppConfig;
@@ -118,21 +126,12 @@ export class ProxyService {
 
     // 如果应该缓存，先尝试从缓存中获取
     if (shouldCache) {
-      const cached = await this.cacheService.get<PageCacheEntry>(decision.cache_key);
+      const cached = await this.cacheService.getCachedResponse(decision.cache_key);
       if (cached) {
         const now = Date.now();
         const age = now - cached.cachedAt;
         if (age < cached.ttl * 1000) {
-          ctx.status = cached.status;
-          for (const [k, v] of Object.entries(cached.headers)) {
-            ctx.set(k, v);
-          }
-          ctx.set("X-Cache", "HIT");
-          const cacheAge = Math.floor(age / 1000).toString();
-          ctx.set("X-Cache-Age", cacheAge);
-          ctx.set("Age", cacheAge);
-          ctx.set("Expires", new Date(cached.cachedAt + cached.ttl * 1000).toUTCString());
-          ctx.body = cached.body;
+          sendCachedResponse(ctx, cached, age);
           return;
         }
       }
@@ -278,7 +277,7 @@ export class ProxyService {
 
           const bodyText = bodyBuffer.toString("utf-8");
           const cacheTags = decision.cache_tags;
-          this.cacheService.set<PageCacheEntry>(decision.cache_key, {
+          await this.cacheService.setCachedResponse(decision.cache_key, {
             status: resp.status,
             headers: cachedHeaders,
             body: bodyText,

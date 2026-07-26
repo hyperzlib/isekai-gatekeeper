@@ -41,6 +41,45 @@ class FakeCacheService {
     }
     return deleted;
   }
+
+  public async consumeRateLimit(options: {
+    key: string;
+    windowSec: number;
+    maxRequests: number;
+    cost: number;
+    now: number;
+  }) {
+    const windowMs = options.windowSec * 1000;
+    const resetAt = Math.floor(options.now / windowMs) * windowMs + windowMs;
+    const stored = this.store.get(options.key);
+    const entry = stored && Date.now() < stored.expiresAt
+      ? stored.value as { count: number; resetAt: number; firstLimitedMarked: boolean }
+      : null;
+    const bucket = !entry || options.now >= entry.resetAt
+      ? { count: 0, resetAt, firstLimitedMarked: false }
+      : entry;
+
+    bucket.count += options.cost;
+    const limited = bucket.count > options.maxRequests;
+    const firstLimitedInWindow = limited && !bucket.firstLimitedMarked;
+    if (limited) {
+      bucket.firstLimitedMarked = true;
+    }
+
+    const ttlSec = Math.max(1, Math.ceil((bucket.resetAt - options.now) / 1000));
+    this.store.set(options.key, {
+      value: bucket,
+      expiresAt: Date.now() + ttlSec * 1000,
+    });
+
+    return {
+      current: bucket.count,
+      limited,
+      remaining: Math.max(0, options.maxRequests - bucket.count),
+      resetAt: bucket.resetAt,
+      firstLimitedInWindow,
+    };
+  }
 }
 
 function makeService(fakeCache: FakeCacheService): RateLimitService {
@@ -116,6 +155,19 @@ describe("RateLimitService - consume", () => {
     expect(r.limited).toBe(false);
     expect(r.firstLimitedInWindow).toBe(false);
     expect(r.resetAt).toBeGreaterThan(Date.now());
+  });
+
+  it("handles concurrent consume calls through the cache atomic API", async () => {
+    const cache = new FakeCacheService();
+    const svc = makeService(cache);
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => svc.consume({ key: "parallel", windowSec: 60, maxRequests: 5 })),
+    );
+
+    expect(results.map((r) => r.current).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(results.filter((r) => r.limited).length).toBe(5);
+    expect(results.filter((r) => r.firstLimitedInWindow).length).toBe(1);
   });
 });
 

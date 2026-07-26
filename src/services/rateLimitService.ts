@@ -37,12 +37,6 @@ export interface ConsumeResult {
   firstLimitedInWindow: boolean;
 }
 
-type Bucket = {
-  count: number;
-  resetAt: number;
-  firstLimitedMarked: boolean;
-};
-
 const RATE_LIMIT_KEY_PREFIX = "rate_limit:";
 
 /**
@@ -73,39 +67,20 @@ export class RateLimitService {
     const cost = Math.max(1, Math.floor(options.cost ?? 1));
 
     const now = Date.now();
-    const windowMs = windowSec * 1000;
-    const resetAt = this.getWindowResetAt(now, windowMs);
-
     const cacheKey = this.getBucketCacheKey(key, windowSec);
-    let bucket = await this.cacheService.get<Bucket>(cacheKey);
-    if (!bucket || now >= bucket.resetAt) {
-      bucket = {
-        count: 0,
-        resetAt,
-        firstLimitedMarked: false,
-      };
-    }
-
-    bucket.count += cost;
-
-    const limited = bucket.count > maxRequests;
-    const firstLimitedInWindow = limited && !bucket.firstLimitedMarked;
-    if (limited) {
-      bucket.firstLimitedMarked = true;
-    }
-
-    const ttlSec = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
-    await this.cacheService.set(cacheKey, bucket, ttlSec);
+    const result = await this.cacheService.consumeRateLimit({
+      key: cacheKey,
+      windowSec,
+      maxRequests,
+      cost,
+      now,
+    });
 
     return {
       key,
       windowSec,
       maxRequests,
-      current: bucket.count,
-      limited,
-      remaining: Math.max(0, maxRequests - bucket.count),
-      resetAt: bucket.resetAt,
-      firstLimitedInWindow,
+      ...result,
     };
   }
 
@@ -166,11 +141,6 @@ export class RateLimitService {
       default:
         return `ip:${ip}`;
     }
-  }
-
-  private getWindowResetAt(nowMs: number, windowMs: number): number {
-    const currentWindowStart = Math.floor(nowMs / windowMs) * windowMs;
-    return currentWindowStart + windowMs;
   }
 
   private getBucketCacheKey(key: string, windowSec: number): string {

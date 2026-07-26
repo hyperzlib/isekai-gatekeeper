@@ -1,20 +1,82 @@
 import { RedisClient } from "bun";
-import { ICacheStore } from "../types/cache";
+import {
+	CachedResponse,
+	CachedResponseMeta,
+	ConsumeRateLimitOptions,
+	ConsumeRateLimitResult,
+	ICacheStore,
+} from "../types/cache";
 
 const TAG_KEY_PREFIX = "tagedCache:";
+const CACHE_META_SUFFIX = ":meta";
+const CACHE_BODY_SUFFIX = ":body";
 
 /** 解析 tag 索引条目 "expiresAt_ms cacheKey"，未过期返回 cacheKey，否则 null */
 function parseTagEntry(entry: string): { cacheKey: string; expired: boolean } | null {
-  const idx = entry.indexOf(" ");
-  if (idx <= 0) return null;
-  const expiresAt = Number(entry.slice(0, idx));
-  const cacheKey = entry.slice(idx + 1);
-  if (!Number.isFinite(expiresAt) || !cacheKey) return null;
-  return { cacheKey, expired: expiresAt <= Date.now() };
+	const idx = entry.indexOf(" ");
+	if (idx <= 0) return null;
+	const expiresAt = Number(entry.slice(0, idx));
+	const cacheKey = entry.slice(idx + 1);
+	if (!Number.isFinite(expiresAt) || !cacheKey) return null;
+	return { cacheKey, expired: expiresAt <= Date.now() };
 }
 
+function metaKey(key: string): string {
+	return `${key}${CACHE_META_SUFFIX}`;
+}
+
+function bodyKey(key: string): string {
+	return `${key}${CACHE_BODY_SUFFIX}`;
+}
+
+function logicalKeyFromMetaKey(key: string): string {
+	return key.endsWith(CACHE_META_SUFFIX) ? key.slice(0, -CACHE_META_SUFFIX.length) : key;
+}
+
+function unique(values: string[]): string[] {
+	return [...new Set(values)];
+}
+
+const RATE_LIMIT_CONSUME_SCRIPT = `
+local key = KEYS[1]
+local windowSec = tonumber(ARGV[1])
+local maxRequests = tonumber(ARGV[2])
+local cost = tonumber(ARGV[3])
+local now = tonumber(ARGV[4])
+local windowMs = windowSec * 1000
+local resetAt = math.floor(now / windowMs) * windowMs + windowMs
+
+local count = tonumber(redis.call("HGET", key, "count"))
+local storedResetAt = tonumber(redis.call("HGET", key, "resetAt"))
+local firstLimitedMarkedRaw = redis.call("HGET", key, "firstLimitedMarked")
+local firstLimitedMarked = firstLimitedMarkedRaw == "1"
+
+if count == nil or storedResetAt == nil or now >= storedResetAt then
+	count = 0
+	storedResetAt = resetAt
+	firstLimitedMarked = false
+end
+
+count = count + cost
+local limited = count > maxRequests
+local firstLimitedInWindow = limited and not firstLimitedMarked
+if limited then
+	firstLimitedMarked = true
+end
+
+local ttlSec = math.ceil((storedResetAt - now) / 1000)
+if ttlSec < 1 then
+	ttlSec = 1
+end
+
+redis.call("HSET", key, "count", count, "resetAt", storedResetAt, "firstLimitedMarked", firstLimitedMarked and "1" or "0")
+redis.call("EXPIRE", key, ttlSec)
+
+return { count, limited and 1 or 0, math.max(0, maxRequests - count), storedResetAt, firstLimitedInWindow and 1 or 0 }
+`;
+
 export class BunRedisCacheStore implements ICacheStore {
-    private client: RedisClient;
+	private client: RedisClient;
 	private readonly maxBodyBytes: number;
 	private readonly defaultTtl: number;
 
@@ -40,55 +102,142 @@ export class BunRedisCacheStore implements ICacheStore {
 		}
 	}
 
-	public async set<T>(key: string, value: T, ttl: number, tags?: string[]): Promise<void> {
+	public async set<T>(key: string, value: T, ttl?: number, _tags?: string[]): Promise<void> {
 		const payload = JSON.stringify(value);
 		if (payload.length > this.maxBodyBytes) return;
 
-		let effectiveTtl = ttl;
-		if (effectiveTtl <= 0) effectiveTtl = this.defaultTtl;
+		const effectiveTtl = this.resolveTtl(ttl);
 
-		await this.client.set(key, payload);
-		if (effectiveTtl > 0) {
-			await this.client.expire(key, effectiveTtl);
+		await this.client.send("SET", [key, payload, "EX", String(effectiveTtl)]);
+	}
+
+	public async getCachedResponseMeta(key: string): Promise<CachedResponseMeta | null> {
+		const keyMeta = metaKey(key);
+		const raw = await this.client.get(keyMeta);
+		if (raw == null) return null;
+
+		try {
+			return JSON.parse(raw) as CachedResponseMeta;
+		} catch {
+			await this.client.del(keyMeta, bodyKey(key));
+			return null;
+		}
+	}
+
+	public async getCachedResponse(key: string): Promise<CachedResponse | null> {
+		const keyMeta = metaKey(key);
+		const keyBody = bodyKey(key);
+		const result = await this.client.send("MGET", [keyMeta, keyBody]) as Array<string | null>;
+		const rawMeta = result[0];
+		const body = result[1];
+		if (rawMeta == null) return null;
+
+		if (body == null) {
+			await this.removeCachedResponseTagIndices(key);
+			await this.client.del(keyMeta);
+			return null;
 		}
 
-		// 写入 tag 索引
-		if (tags && tags.length > 0) {
+		try {
+			const meta = JSON.parse(rawMeta) as CachedResponseMeta;
+			return { ...meta, body };
+		} catch {
+			await this.client.del(keyMeta, keyBody);
+			return null;
+		}
+	}
+
+	public async setCachedResponse(
+		key: string,
+		value: CachedResponse,
+		ttl?: number,
+		tags?: string[],
+	): Promise<void> {
+		const effectiveTtl = this.resolveTtl(ttl);
+		const effectiveTags = tags ?? value.tags;
+		const { body, ...meta } = { ...value, tags: effectiveTags };
+		const metaPayload = JSON.stringify(meta);
+		if (metaPayload.length + body.length > this.maxBodyBytes) return;
+
+		await this.removeCachedResponseTagIndices(key);
+		await this.client.send("SET", [metaKey(key), metaPayload, "EX", String(effectiveTtl)]);
+		await this.client.send("SET", [bodyKey(key), body, "EX", String(effectiveTtl)]);
+
+		if (effectiveTags && effectiveTags.length > 0) {
 			const expiresAt = Date.now() + effectiveTtl * 1000;
 			const entry = `${expiresAt} ${key}`;
-			for (const tag of tags) {
+			for (const tag of effectiveTags) {
 				await this.client.send("RPUSH", [TAG_KEY_PREFIX + tag, entry]);
 			}
 		}
 	}
 
+	public async deleteCachedResponse(key: string): Promise<void> {
+		await this.removeCachedResponseTagIndices(key);
+		await this.client.del(metaKey(key), bodyKey(key));
+	}
+
+	public async consumeRateLimit(options: ConsumeRateLimitOptions): Promise<ConsumeRateLimitResult> {
+		const result = await this.client.send("EVAL", [
+			RATE_LIMIT_CONSUME_SCRIPT,
+			"1",
+			options.key,
+			String(options.windowSec),
+			String(options.maxRequests),
+			String(options.cost),
+			String(options.now),
+		]) as Array<number | string>;
+
+		const values = result.map(Number);
+		const current = values[0] ?? 0;
+		const limited = values[1] ?? 0;
+		const remaining = values[2] ?? 0;
+		const resetAt = values[3] ?? 0;
+		const firstLimitedInWindow = values[4] ?? 0;
+		return {
+			current,
+			limited: limited === 1,
+			remaining,
+			resetAt,
+			firstLimitedInWindow: firstLimitedInWindow === 1,
+		};
+	}
+
 	public async delete(key: string): Promise<void> {
-		// 先读取缓存条目中的 tags 以清理索引
-		await this.removeFromTagIndices(key);
 		await this.client.del(key);
 	}
 
 	public async deleteByPrefix(prefix: string): Promise<number> {
-		const pattern = `${prefix}*`;
 		let cursor = "0";
 		let deleted = 0;
+		const logicalCacheKeys = new Set<string>();
+		const plainKeys = new Set<string>();
 
 		do {
-			const resp = await this.client.send("SCAN", [cursor, "MATCH", pattern, "COUNT", "200"]);
+			const resp = await this.client.send("SCAN", [cursor, "MATCH", `${prefix}*`, "COUNT", "200"]);
 			const nextCursor = String((resp as [string, string[]])[0]);
 			const keys = ((resp as [string, string[]])[1] ?? []) as string[];
 
-			if (keys.length > 0) {
-				// 清理每个 key 的 tag 索引
-				for (const k of keys) {
-					await this.removeFromTagIndices(k);
+			for (const key of keys) {
+				if (key.endsWith(CACHE_META_SUFFIX)) {
+					logicalCacheKeys.add(logicalKeyFromMetaKey(key));
+				} else if (!key.endsWith(CACHE_BODY_SUFFIX)) {
+					plainKeys.add(key);
 				}
-				const n = await this.client.del(...keys);
-				deleted += Number(n);
 			}
 
 			cursor = nextCursor;
 		} while (cursor !== "0");
+
+		for (const key of logicalCacheKeys) {
+			await this.deleteCachedResponse(key);
+			deleted++;
+		}
+
+		if (plainKeys.size > 0) {
+			const n = await this.client.del(...plainKeys);
+			deleted += Number(n);
+		}
 
 		return deleted;
 	}
@@ -102,22 +251,14 @@ export class BunRedisCacheStore implements ICacheStore {
 		}
 
 		let deleted = 0;
-		const keysToDelete: string[] = [];
-		for (const item of items) {
+		for (const key of unique(items.flatMap((item) => {
 			const parsed = parseTagEntry(item);
-			if (!parsed) continue;
-			if (!parsed.expired) {
-				keysToDelete.push(parsed.cacheKey);
-			}
-		}
-
-		if (keysToDelete.length > 0) {
-			// 清理各自剩余 tag 索引
-			for (const k of keysToDelete) {
-				await this.removeFromTagIndices(k);
-			}
-			const n = await this.client.del(...keysToDelete);
-			deleted += Number(n);
+			return parsed && !parsed.expired ? [parsed.cacheKey] : [];
+		}))) {
+			const meta = await this.getCachedResponseMeta(key);
+			if (!meta) continue;
+			await this.deleteCachedResponse(key);
+			deleted++;
 		}
 
 		await this.client.del(tagKey);
@@ -130,29 +271,46 @@ export class BunRedisCacheStore implements ICacheStore {
 		if (!items || items.length === 0) return [];
 
 		const result: string[] = [];
+		const expiredItems: string[] = [];
 		for (const item of items) {
 			const parsed = parseTagEntry(item);
-			if (parsed && !parsed.expired) {
-				result.push(parsed.cacheKey);
+			if (!parsed || parsed.expired) {
+				expiredItems.push(item);
+			} else {
+				const meta = await this.getCachedResponseMeta(parsed.cacheKey);
+				if (meta) {
+					result.push(parsed.cacheKey);
+				} else {
+					expiredItems.push(item);
+				}
 			}
 		}
-		return result;
+
+		for (const item of expiredItems) {
+			await this.client.send("LREM", [tagKey, "1", item]);
+		}
+
+		const remaining = await this.client.send("LLEN", [tagKey]) as number;
+		if (remaining === 0) {
+			await this.client.del(tagKey);
+		}
+
+		return unique(result);
 	}
 
 	public async listByPrefix(prefix: string): Promise<string[]> {
-		const pattern = `${prefix}*`;
 		let cursor = "0";
 		const keys: string[] = [];
 
 		do {
-			const resp = await this.client.send("SCAN", [cursor, "MATCH", pattern, "COUNT", "200"]);
+			const resp = await this.client.send("SCAN", [cursor, "MATCH", `${prefix}*${CACHE_META_SUFFIX}`, "COUNT", "200"]);
 			const nextCursor = String((resp as [string, string[]])[0]);
 			const batch = ((resp as [string, string[]])[1] ?? []) as string[];
-			keys.push(...batch);
+			keys.push(...batch.map(logicalKeyFromMetaKey));
 			cursor = nextCursor;
 		} while (cursor !== "0");
 
-		return keys;
+		return unique(keys);
 	}
 
 	public async cleanExpiredTagIndices(): Promise<number> {
@@ -172,23 +330,14 @@ export class BunRedisCacheStore implements ICacheStore {
 					continue;
 				}
 
-				const toRemove: string[] = [];
 				for (const item of items) {
 					const parsed = parseTagEntry(item);
 					if (!parsed || parsed.expired) {
-						toRemove.push(item);
-					}
-				}
-
-				if (toRemove.length > 0) {
-					for (const entry of toRemove) {
-						// LREM count=1 精确值删除（值中不含空格的极端情况很少，LREM 精确匹配可行）
-						await this.client.send("LREM", [tagKey, "1", entry]);
+						await this.client.send("LREM", [tagKey, "1", item]);
 						cleaned++;
 					}
 				}
 
-				// 列表变空则删除 tag key
 				const remaining = await this.client.send("LLEN", [tagKey]) as number;
 				if (remaining === 0) {
 					await this.client.del(tagKey);
@@ -206,38 +355,32 @@ export class BunRedisCacheStore implements ICacheStore {
 		return Number(count) || 0;
 	}
 
-	/**
-	 * 从所有关联的 tag 索引中移除指定 key。
-	 * 通过扫描 tagedCache:* 并逐条 LREM 实现。
-	 */
-	private async removeFromTagIndices(key: string): Promise<void> {
-		const pattern = `${TAG_KEY_PREFIX}*`;
-		let cursor = "0";
+	private async removeCachedResponseTagIndices(key: string): Promise<void> {
+		const meta = await this.getCachedResponseMeta(key);
+		const tags = meta?.tags;
+		if (!tags || tags.length === 0) return;
 
-		do {
-			const resp = await this.client.send("SCAN", [cursor, "MATCH", pattern, "COUNT", "50"]);
-			const nextCursor = String((resp as [string, string[]])[0]);
-			const tagKeys = ((resp as [string, string[]])[1] ?? []) as string[];
+		for (const tag of tags) {
+			const tagKey = TAG_KEY_PREFIX + tag;
+			const items = await this.client.send("LRANGE", [tagKey, "0", "-1"]) as string[];
+			if (!items || items.length === 0) continue;
 
-			for (const tagKey of tagKeys) {
-				const items = await this.client.send("LRANGE", [tagKey, "0", "-1"]) as string[];
-				if (!items) continue;
-
-				for (const item of items) {
-					const parsed = parseTagEntry(item);
-					if (parsed && parsed.cacheKey === key) {
-						await this.client.send("LREM", [tagKey, "1", item]);
-					}
-				}
-
-				// 清理空列表
-				const remaining = await this.client.send("LLEN", [tagKey]) as number;
-				if (remaining === 0) {
-					await this.client.del(tagKey);
+			for (const item of items) {
+				const parsed = parseTagEntry(item);
+				if (parsed && parsed.cacheKey === key) {
+					await this.client.send("LREM", [tagKey, "1", item]);
 				}
 			}
 
-			cursor = nextCursor;
-		} while (cursor !== "0");
+			const remaining = await this.client.send("LLEN", [tagKey]) as number;
+			if (remaining === 0) {
+				await this.client.del(tagKey);
+			}
+		}
+	}
+
+	private resolveTtl(ttl?: number): number {
+		const effectiveTtl = ttl ?? this.defaultTtl;
+		return effectiveTtl > 0 ? effectiveTtl : this.defaultTtl;
 	}
 }

@@ -1,15 +1,23 @@
 import { describe, it, expect } from "bun:test";
 import { MemoryCacheStore } from "../../src/lib/memoryCacheStore.ts";
-import { CachedResponse } from "../../src/types/cache.ts";
+import { BunRedisCacheStore } from "../../src/lib/bunRedisCacheStore.ts";
+import { CachedResponse, ICacheStore } from "../../src/types/cache.ts";
 
 function makeResp(body: string, ttl = 60): CachedResponse {
   return {
     status: 200,
     headers: { "content-type": "text/html" },
-    body: new TextEncoder().encode(body),
+    body,
     cachedAt: Date.now(),
     ttl,
   };
+}
+
+const redisTestUrl = Bun.env["ISEKAI_TEST_REDIS_URL"];
+const describeRedis = redisTestUrl ? describe : describe.skip;
+
+function redisKeyPrefix(): string {
+  return `test:${Date.now()}:${Math.random().toString(16).slice(2)}:`;
 }
 
 describe("CacheStore", () => {
@@ -18,7 +26,7 @@ describe("CacheStore", () => {
     await store.set("/foo", makeResp("hello"));
     const entry = await store.get<CachedResponse>("/foo");
     expect(entry).not.toBeNull();
-    expect(new TextDecoder().decode(entry!.body)).toBe("hello");
+    expect(entry!.body).toBe("hello");
   });
 
   it("returns null for missing entries", async () => {
@@ -82,14 +90,65 @@ describe("CacheStore", () => {
   });
 });
 
+describe("CacheStore - CachedResponse API", () => {
+  it("stores response meta separately from body at the API level", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    await store.setCachedResponse("/page", makeResp("hello"), 60, ["page"]);
+
+    const meta = await store.getCachedResponseMeta("/page");
+    expect(meta).toEqual({
+      status: 200,
+      headers: { "content-type": "text/html" },
+      cachedAt: expect.any(Number),
+      ttl: 60,
+      tags: ["page"],
+    });
+    expect("body" in meta!).toBe(false);
+
+    const entry = await store.getCachedResponse("/page");
+    expect(entry?.body).toBe("hello");
+  });
+
+  it("deleteCachedResponse removes response and tag indices", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    await store.setCachedResponse("/page", makeResp("hello"), 60, ["page"]);
+
+    await store.deleteCachedResponse("/page");
+
+    expect(await store.getCachedResponse("/page")).toBeNull();
+    expect(await store.listByTag("page")).toEqual([]);
+  });
+
+  it("overwriting a response removes stale tag indices", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    await store.setCachedResponse("/page", makeResp("hello"), 60, ["old"]);
+    await store.setCachedResponse("/page", makeResp("updated"), 60, ["new"]);
+
+    expect(await store.listByTag("old")).toEqual([]);
+    expect(await store.listByTag("new")).toEqual(["/page"]);
+  });
+
+  it("does not scan tag indices when cached response has no tags", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    await store.setCachedResponse("/page", makeResp("hello"), 60);
+
+    const storeAny = store as unknown as { tagIndex: Map<string, Map<string, number>> };
+    storeAny.tagIndex.set("orphan", new Map([["/page", Date.now() + 60_000]]));
+
+    await store.deleteCachedResponse("/page");
+
+    expect(await store.listByTag("orphan")).toEqual(["/page"]);
+  });
+});
+
 // ── Tag index tests ─────────────────────────────────────────────────────────
 
 describe("CacheStore - Tag index", () => {
   it("listByTag returns keys for a tag", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/wiki/A", makeResp("a"), 60, ["wiki"]);
-    await store.set("/wiki/B", makeResp("b"), 60, ["wiki", "zh"]);
-    await store.set("/other", makeResp("c"), 60, ["other"]);
+    await store.setCachedResponse("/wiki/A", makeResp("a"), 60, ["wiki"]);
+    await store.setCachedResponse("/wiki/B", makeResp("b"), 60, ["wiki", "zh"]);
+    await store.setCachedResponse("/other", makeResp("c"), 60, ["other"]);
 
     const wikiKeys = await store.listByTag("wiki");
     expect(wikiKeys.sort()).toEqual(["/wiki/A", "/wiki/B"].sort());
@@ -104,8 +163,8 @@ describe("CacheStore - Tag index", () => {
   it("listByTag excludes expired entries", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
     // Set one entry with a very short TTL that we'll force-expire
-    await store.set("/expired", makeResp("x"), 60, ["wiki"]);
-    await store.set("/fresh", makeResp("y"), 3600, ["wiki"]);
+    await store.setCachedResponse("/expired", makeResp("x"), 60, ["wiki"]);
+    await store.setCachedResponse("/fresh", makeResp("y"), 3600, ["wiki"]);
 
     // Force /expired's tag index to be expired
     const storeAny = store as unknown as { tagIndex: Map<string, Map<string, number>> };
@@ -124,9 +183,9 @@ describe("CacheStore - Tag index", () => {
 
   it("listByPrefix returns matching keys", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/wiki/A", makeResp("a"), 60);
-    await store.set("/wiki/B", makeResp("b"), 60);
-    await store.set("/other", makeResp("c"), 60);
+    await store.setCachedResponse("/wiki/A", makeResp("a"), 60);
+    await store.setCachedResponse("/wiki/B", makeResp("b"), 60);
+    await store.setCachedResponse("/other", makeResp("c"), 60);
 
     const keys = await store.listByPrefix("/wiki/");
     expect(keys.sort()).toEqual(["/wiki/A", "/wiki/B"].sort());
@@ -137,23 +196,23 @@ describe("CacheStore - Tag index", () => {
 
   it("listByPrefix returns empty for no match", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/wiki/A", makeResp("a"), 60);
+    await store.setCachedResponse("/wiki/A", makeResp("a"), 60);
     const keys = await store.listByPrefix("/nonexistent/");
     expect(keys).toEqual([]);
   });
 
   it("deleteByTag removes cached entries and returns count", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/wiki/A", makeResp("a"), 60, ["wiki"]);
-    await store.set("/wiki/B", makeResp("b"), 60, ["wiki", "zh"]);
-    await store.set("/other", makeResp("c"), 60, ["other"]);
+    await store.setCachedResponse("/wiki/A", makeResp("a"), 60, ["wiki"]);
+    await store.setCachedResponse("/wiki/B", makeResp("b"), 60, ["wiki", "zh"]);
+    await store.setCachedResponse("/other", makeResp("c"), 60, ["other"]);
 
     const count = await store.deleteByTag("wiki");
     expect(count).toBe(2);
 
-    const entryA = await store.get<CachedResponse>("/wiki/A");
-    const entryB = await store.get<CachedResponse>("/wiki/B");
-    const entryC = await store.get<CachedResponse>("/other");
+    const entryA = await store.getCachedResponse("/wiki/A");
+    const entryB = await store.getCachedResponse("/wiki/B");
+    const entryC = await store.getCachedResponse("/other");
     expect(entryA).toBeNull();
     expect(entryB).toBeNull();
     expect(entryC).not.toBeNull();
@@ -161,7 +220,7 @@ describe("CacheStore - Tag index", () => {
 
   it("deleteByTag cleans up tag indices for deleted entries", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/shared", makeResp("s"), 60, ["wiki", "zh"]);
+    await store.setCachedResponse("/shared", makeResp("s"), 60, ["wiki", "zh"]);
 
     await store.deleteByTag("wiki");
 
@@ -182,8 +241,8 @@ describe("CacheStore - Tag index", () => {
 
   it("deleteByTag skips expired entries", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/expired", makeResp("x"), 60, ["wiki"]);
-    await store.set("/fresh", makeResp("y"), 3600, ["wiki"]);
+    await store.setCachedResponse("/expired", makeResp("x"), 60, ["wiki"]);
+    await store.setCachedResponse("/fresh", makeResp("y"), 3600, ["wiki"]);
 
     // Force-expire /expired's tag index (but not the store entry)
     const storeAny = store as unknown as { tagIndex: Map<string, Map<string, number>> };
@@ -193,19 +252,19 @@ describe("CacheStore - Tag index", () => {
     const count = await store.deleteByTag("wiki");
     expect(count).toBe(1);
 
-    const freshEntry = await store.get<CachedResponse>("/fresh");
+    const freshEntry = await store.getCachedResponse("/fresh");
     expect(freshEntry).toBeNull(); // was deleted
 
     // expired tag-index entry was skipped, so store entry still exists
-    const expiredEntry = await store.get<CachedResponse>("/expired");
+    const expiredEntry = await store.getCachedResponse("/expired");
     expect(expiredEntry).not.toBeNull();
   });
 
   it("cleanExpiredTagIndices removes expired entries from all tags", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/exp-a", makeResp("a"), 60, ["wiki"]);
-    await store.set("/exp-b", makeResp("b"), 60, ["zh"]);
-    await store.set("/fresh", makeResp("c"), 3600, ["wiki", "zh"]);
+    await store.setCachedResponse("/exp-a", makeResp("a"), 60, ["wiki"]);
+    await store.setCachedResponse("/exp-b", makeResp("b"), 60, ["zh"]);
+    await store.setCachedResponse("/fresh", makeResp("c"), 3600, ["wiki", "zh"]);
 
     const storeAny = store as unknown as { tagIndex: Map<string, Map<string, number>> };
     storeAny.tagIndex.get("wiki")!.set("/exp-a", Date.now() - 1);
@@ -224,7 +283,7 @@ describe("CacheStore - Tag index", () => {
 
   it("cleanExpiredTagIndices removes empty tag keys", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/sole", makeResp("s"), 60, ["wiki"]);
+    await store.setCachedResponse("/sole", makeResp("s"), 60, ["wiki"]);
 
     const storeAny = store as unknown as { tagIndex: Map<string, Map<string, number>> };
     storeAny.tagIndex.get("wiki")!.set("/sole", Date.now() - 1);
@@ -239,9 +298,9 @@ describe("CacheStore - Tag index", () => {
 
   it("delete removes entry from tag indices", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/shared", makeResp("s"), 60, ["wiki", "zh"]);
+    await store.setCachedResponse("/shared", makeResp("s"), 60, ["wiki", "zh"]);
 
-    await store.delete("/shared");
+    await store.deleteCachedResponse("/shared");
 
     const wikiKeys = await store.listByTag("wiki");
     const zhKeys = await store.listByTag("zh");
@@ -251,9 +310,9 @@ describe("CacheStore - Tag index", () => {
 
   it("deleteByPrefix cleans tag indices for removed entries", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/wiki/A", makeResp("a"), 60, ["wiki"]);
-    await store.set("/wiki/B", makeResp("b"), 60, ["wiki"]);
-    await store.set("/other", makeResp("c"), 60, ["wiki"]);
+    await store.setCachedResponse("/wiki/A", makeResp("a"), 60, ["wiki"]);
+    await store.setCachedResponse("/wiki/B", makeResp("b"), 60, ["wiki"]);
+    await store.setCachedResponse("/other", makeResp("c"), 60, ["wiki"]);
 
     await store.deleteByPrefix("/wiki/");
 
@@ -264,10 +323,10 @@ describe("CacheStore - Tag index", () => {
 
   it("set with empty tags array is a no-op for tag index", async () => {
     const store = new MemoryCacheStore(100, 1_000_000);
-    await store.set("/notag", makeResp("x"), 60, []);
-    await store.set("/notag2", makeResp("y"), 60);
+    await store.setCachedResponse("/notag", makeResp("x"), 60, []);
+    await store.setCachedResponse("/notag2", makeResp("y"), 60);
 
-    const entry = await store.get<CachedResponse>("/notag");
+    const entry = await store.getCachedResponse("/notag");
     expect(entry).not.toBeNull();
     // No tags were written, listByTag for anything returns empty
     const keys = await store.listByTag("anything");
@@ -276,15 +335,119 @@ describe("CacheStore - Tag index", () => {
 
   it("LRU eviction also cleans tag indices", async () => {
     const store = new MemoryCacheStore(2, 1_000_000);
-    await store.set("/a", makeResp("a"), 60, ["wiki"]);
-    await store.set("/b", makeResp("b"), 60, ["wiki"]);
-    await store.set("/c", makeResp("c"), 60, ["wiki"]); // evicts /a
+    await store.setCachedResponse("/a", makeResp("a"), 60, ["wiki"]);
+    await store.setCachedResponse("/b", makeResp("b"), 60, ["wiki"]);
+    await store.setCachedResponse("/c", makeResp("c"), 60, ["wiki"]); // evicts /a
 
-    const entryA = await store.get<CachedResponse>("/a");
+    const entryA = await store.getCachedResponse("/a");
     expect(entryA).toBeNull();
 
     // /a should be removed from tag index too
     const wikiKeys = await store.listByTag("wiki");
     expect(wikiKeys.sort()).toEqual(["/b", "/c"].sort());
+  });
+});
+
+describeRedis("BunRedisCacheStore - optional Redis integration", () => {
+  async function makeRedisStore(): Promise<{ store: ICacheStore; prefix: string }> {
+    const store = new BunRedisCacheStore(redisTestUrl!, 1_000_000, 60);
+    await store.init();
+    return { store, prefix: redisKeyPrefix() };
+  }
+
+  it("stores generic values without using response cache keys", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const key = `${prefix}generic`;
+
+    await store.set(key, { ok: true }, 60);
+
+    expect(await store.get<{ ok: boolean }>(key)).toEqual({ ok: true });
+    expect(await store.getCachedResponseMeta(key)).toBeNull();
+
+    await store.delete(key);
+    expect(await store.get<{ ok: boolean }>(key)).toBeNull();
+  });
+
+  it("stores cached response meta and body under the logical key", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const key = `${prefix}page`;
+
+    await store.setCachedResponse(key, makeResp("hello"), 60, [`${prefix}tag`]);
+
+    const meta = await store.getCachedResponseMeta(key);
+    expect(meta).toEqual({
+      status: 200,
+      headers: { "content-type": "text/html" },
+      cachedAt: expect.any(Number),
+      ttl: 60,
+      tags: [`${prefix}tag`],
+    });
+    expect("body" in meta!).toBe(false);
+
+    const cached = await store.getCachedResponse(key);
+    expect(cached?.body).toBe("hello");
+    expect(await store.listByPrefix(prefix)).toEqual([key]);
+
+    await store.deleteCachedResponse(key);
+    expect(await store.getCachedResponse(key)).toBeNull();
+    expect(await store.listByTag(`${prefix}tag`)).toEqual([]);
+  });
+
+  it("cleans stale tag indices from previous cached response tags", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const key = `${prefix}page`;
+
+    await store.setCachedResponse(key, makeResp("old"), 60, [`${prefix}old`]);
+    await store.setCachedResponse(key, makeResp("new"), 60, [`${prefix}new`]);
+
+    expect(await store.listByTag(`${prefix}old`)).toEqual([]);
+    expect(await store.listByTag(`${prefix}new`)).toEqual([key]);
+
+    await store.deleteByTag(`${prefix}new`);
+    expect(await store.getCachedResponse(key)).toBeNull();
+  });
+
+  it("deletes cached responses by logical prefix without exposing meta/body keys", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const a = `${prefix}wiki/A`;
+    const b = `${prefix}wiki/B`;
+    const other = `${prefix}other`;
+
+    await store.setCachedResponse(a, makeResp("a"), 60, [`${prefix}wiki`]);
+    await store.setCachedResponse(b, makeResp("b"), 60, [`${prefix}wiki`]);
+    await store.setCachedResponse(other, makeResp("other"), 60, [`${prefix}other`]);
+
+    expect((await store.listByPrefix(`${prefix}wiki/`)).sort()).toEqual([a, b].sort());
+    const deleted = await store.deleteByPrefix(`${prefix}wiki/`);
+
+    expect(deleted).toBe(2);
+    expect(await store.getCachedResponse(a)).toBeNull();
+    expect(await store.getCachedResponse(b)).toBeNull();
+    expect(await store.getCachedResponse(other)).not.toBeNull();
+    expect(await store.listByTag(`${prefix}wiki`)).toEqual([]);
+
+    await store.deleteByPrefix(prefix);
+  });
+
+  it("consumes rate limits atomically through Redis", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const key = `${prefix}rate`;
+    const now = Date.now();
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => store.consumeRateLimit({
+        key,
+        windowSec: 60,
+        maxRequests: 5,
+        cost: 1,
+        now,
+      })),
+    );
+
+    expect(results.map((r) => r.current).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(results.filter((r) => r.limited).length).toBe(5);
+    expect(results.filter((r) => r.firstLimitedInWindow).length).toBe(1);
+
+    await store.delete(key);
   });
 });

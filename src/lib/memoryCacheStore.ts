@@ -1,9 +1,21 @@
-import { ICacheStore } from "../types/cache";
+import {
+  CachedResponse,
+  CachedResponseMeta,
+  ConsumeRateLimitOptions,
+  ConsumeRateLimitResult,
+  ICacheStore,
+} from "../types/cache";
 
 interface CacheEntry {
   value: any;
   expiresAt?: number;
 }
+
+type RateLimitBucket = {
+  count: number;
+  resetAt: number;
+  firstLimitedMarked: boolean;
+};
 
 /**
  * 基于 LRU 的内存缓存存储。
@@ -30,7 +42,7 @@ export class MemoryCacheStore implements ICacheStore {
     if (!entry) return null;
 
     if (entry.expiresAt !== undefined && Date.now() > entry.expiresAt) {
-      this.deleteFromTagIndices(key);
+      this.removeCachedResponseTagIndices(key);
       this.store.delete(key);
       return null;
     }
@@ -46,14 +58,14 @@ export class MemoryCacheStore implements ICacheStore {
     if (JSON.stringify(value).length > this.maxBodyBytes) return;
 
     // 若键已存在，先清理旧 tag 索引
-    this.deleteFromTagIndices(key);
+    this.removeCachedResponseTagIndices(key);
     this.store.delete(key);
 
     // LRU 淘汰：超出容量时删除最早的条目
     if (this.store.size >= this.maxEntries) {
       const firstKey = this.store.keys().next().value;
       if (firstKey !== undefined) {
-        this.deleteFromTagIndices(firstKey);
+        this.removeCachedResponseTagIndices(firstKey);
         this.store.delete(firstKey);
       }
     }
@@ -84,8 +96,72 @@ export class MemoryCacheStore implements ICacheStore {
     }
   }
 
+  public async getCachedResponseMeta(key: string): Promise<CachedResponseMeta | null> {
+    const cached = await this.get<CachedResponse>(key);
+    if (!cached) return null;
+    const { body: _body, ...meta } = cached;
+    return meta;
+  }
+
+  public async getCachedResponse(key: string): Promise<CachedResponse | null> {
+    return this.get<CachedResponse>(key);
+  }
+
+  public async setCachedResponse(
+    key: string,
+    value: CachedResponse,
+    ttl?: number,
+    tags?: string[],
+  ): Promise<void> {
+    const effectiveTags = tags ?? value.tags;
+    await this.set(key, { ...value, tags: effectiveTags }, ttl, effectiveTags);
+  }
+
+  public async deleteCachedResponse(key: string): Promise<void> {
+    await this.delete(key);
+  }
+
+  public async consumeRateLimit(options: ConsumeRateLimitOptions): Promise<ConsumeRateLimitResult> {
+    const windowMs = options.windowSec * 1000;
+    const resetAt = Math.floor(options.now / windowMs) * windowMs + windowMs;
+
+    const entry = this.store.get(options.key);
+    let bucket = entry?.value as RateLimitBucket | undefined;
+    if (
+      !bucket ||
+      typeof bucket.count !== "number" ||
+      typeof bucket.resetAt !== "number" ||
+      options.now >= bucket.resetAt
+    ) {
+      bucket = {
+        count: 0,
+        resetAt,
+        firstLimitedMarked: false,
+      };
+    }
+
+    bucket.count += options.cost;
+
+    const limited = bucket.count > options.maxRequests;
+    const firstLimitedInWindow = limited && !bucket.firstLimitedMarked;
+    if (limited) {
+      bucket.firstLimitedMarked = true;
+    }
+
+    const ttlSec = Math.max(1, Math.ceil((bucket.resetAt - options.now) / 1000));
+    await this.set(options.key, bucket, ttlSec);
+
+    return {
+      current: bucket.count,
+      limited,
+      remaining: Math.max(0, options.maxRequests - bucket.count),
+      resetAt: bucket.resetAt,
+      firstLimitedInWindow,
+    };
+  }
+
   public async delete(key: string): Promise<void> {
-    this.deleteFromTagIndices(key);
+    this.removeCachedResponseTagIndices(key);
     this.store.delete(key);
   }
 
@@ -96,7 +172,7 @@ export class MemoryCacheStore implements ICacheStore {
     let count = 0;
     for (const key of this.store.keys()) {
       if (key.startsWith(prefix)) {
-        this.deleteFromTagIndices(key);
+        this.removeCachedResponseTagIndices(key);
         this.store.delete(key);
         count++;
       }
@@ -113,21 +189,8 @@ export class MemoryCacheStore implements ICacheStore {
 
     for (const [key, expiresAt] of tagMap) {
       if (expiresAt > now) {
-        this.store.delete(key);
+        await this.deleteCachedResponse(key);
         deleted++;
-      }
-    }
-
-    // 同时清理其他 tag 对此 key 的引用
-    for (const [otherTag, otherMap] of this.tagIndex) {
-      if (otherTag === tag) continue;
-      for (const [key] of otherMap) {
-        if (tagMap.has(key)) {
-          otherMap.delete(key);
-        }
-      }
-      if (otherMap.size === 0) {
-        this.tagIndex.delete(otherTag);
       }
     }
 
@@ -182,13 +245,24 @@ export class MemoryCacheStore implements ICacheStore {
     return this.store.size;
   }
 
-  /** 从所有 tag 索引中移除指定 key */
-  private deleteFromTagIndices(key: string): void {
-    for (const [tag, tagMap] of this.tagIndex) {
+  /** 从缓存对象声明的 tag 索引中移除指定 key */
+  private removeCachedResponseTagIndices(key: string): void {
+    const tags = this.getTagsForKey(key);
+    if (tags.length === 0) return;
+
+    for (const tag of tags) {
+      const tagMap = this.tagIndex.get(tag);
+      if (!tagMap) continue;
       tagMap.delete(key);
       if (tagMap.size === 0) {
         this.tagIndex.delete(tag);
       }
     }
+  }
+
+  private getTagsForKey(key: string): string[] {
+    const entry = this.store.get(key);
+    const value = entry?.value as { tags?: unknown } | undefined;
+    return Array.isArray(value?.tags) ? value.tags.filter((tag): tag is string => typeof tag === "string") : [];
   }
 }

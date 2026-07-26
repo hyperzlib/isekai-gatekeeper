@@ -1,5 +1,11 @@
 import { MemoryCacheStore } from "../lib/memoryCacheStore.ts";
-import { CachedResponse, ICacheStore } from "../types/cache.ts";
+import {
+  CachedResponse,
+  CachedResponseMeta,
+  ConsumeRateLimitOptions,
+  ConsumeRateLimitResult,
+  ICacheStore,
+} from "../types/cache.ts";
 import type { AppConfig, CacheConfig } from "../types/config.ts";
 
 export type { CachedResponse };
@@ -48,6 +54,26 @@ export class CacheService {
 
   public set<T>(key: string, resp: T, ttl?: number, tags?: string[]): Promise<void> {
     return this.store.set<T>(key, resp, ttl, tags);
+  }
+
+  public getCachedResponseMeta(key: string): Promise<CachedResponseMeta | null> {
+    return this.store.getCachedResponseMeta(key);
+  }
+
+  public getCachedResponse(key: string): Promise<CachedResponse | null> {
+    return this.store.getCachedResponse(key);
+  }
+
+  public setCachedResponse(key: string, resp: CachedResponse, ttl?: number, tags?: string[]): Promise<void> {
+    return this.store.setCachedResponse(key, resp, ttl, tags);
+  }
+
+  public deleteCachedResponse(key: string): Promise<void> {
+    return this.store.deleteCachedResponse(key);
+  }
+
+  public consumeRateLimit(options: ConsumeRateLimitOptions): Promise<ConsumeRateLimitResult> {
+    return this.store.consumeRateLimit(options);
   }
 
   public delete(key: string): Promise<void> {

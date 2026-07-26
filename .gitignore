@@ -153,6 +153,7 @@ dist/
 
 !/data/geoip/README.md
 /data/rule-debug.json
+*.cpuprofile
 
 # Config files
 config.ts

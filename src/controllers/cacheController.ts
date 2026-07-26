@@ -68,7 +68,7 @@ export const deleteCache = async (ctx: Koa.Context) => {
     }
 
     const key = makePageCacheKey(site, parsed.pathname, parsed.search, ctx.appConfig.cache.cache_key_mode);
-    await ctx.cacheService.delete(key);
+    await ctx.cacheService.deleteCachedResponse(key);
     ctx.body = { deleted: 1 };
     return;
   }

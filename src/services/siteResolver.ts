@@ -1,6 +1,7 @@
-import type Koa from "koa";
+import type { AppContext } from "../types/hono.ts";
 import type { AppConfig, SiteConfig } from "../types/config.ts";
 import { getRequestHostCandidates, normalizeConfiguredHostname } from "../utils/host.ts";
+import { getRequestHost, getRequestProtocol } from "../utils/request.ts";
 
 export interface ResolvedSite {
   id: string;
@@ -24,8 +25,8 @@ export class SiteResolver {
     }
   }
 
-  public resolve(ctx: Koa.Context): ResolvedSite | null {
-    return this.resolveHost(ctx.headers["host"], ctx.protocol);
+  public resolve(ctx: AppContext): ResolvedSite | null {
+    return this.resolveHost(getRequestHost(ctx), getRequestProtocol(ctx));
   }
 
   public resolveHost(hostHeader: string | string[] | undefined, protocol?: string): ResolvedSite | null {

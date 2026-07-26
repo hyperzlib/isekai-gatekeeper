@@ -1,4 +1,4 @@
-import type { Context } from "koa";
+import type { AppContext } from "../types/hono.ts";
 import type { CloudflareHttp, CloudflareStringArrayMap } from "../types/cloudflare.ts";
 
 function createMemo<T>(factory: () => T): () => T {
@@ -31,10 +31,8 @@ function createLazyProxy<T extends Record<string, unknown>>(
 	});
 }
 
-function getHeader(ctx: Context, name: string): string {
-	const value = ctx.request.headers[name.toLowerCase()];
-	if (Array.isArray(value)) return value[0] ?? "";
-	return value ?? "";
+function getHeader(ctx: AppContext, name: string): string {
+	return ctx.req.header(name) ?? "";
 }
 
 function parseExtension(pathname: string): string {
@@ -99,7 +97,7 @@ function parseCookies(cookieHeader: string): CloudflareStringArrayMap {
 	return cookies;
 }
 
-function parseHeaders(ctx: Context): {
+function parseHeaders(ctx: AppContext): {
 	map: CloudflareStringArrayMap;
 	names: string[];
 	values: string[];
@@ -108,25 +106,18 @@ function parseHeaders(ctx: Context): {
 	const names: string[] = [];
 	const values: string[] = [];
 
-	for (const [name, rawValue] of Object.entries(ctx.request.headers)) {
-		if (rawValue === undefined) continue;
+	for (const [name, rawValue] of ctx.req.raw.headers.entries()) {
 		const lowerName = name.toLowerCase();
 		names.push(lowerName);
-
-		if (Array.isArray(rawValue)) {
-			map[lowerName] = rawValue;
-			values.push(...rawValue);
-		} else {
-			map[lowerName] = [rawValue];
-			values.push(rawValue);
-		}
+		map[lowerName] = [rawValue];
+		values.push(rawValue);
 	}
 
 	return { map, names, values };
 }
 
-export function toCloudflareHttp(ctx: Context): CloudflareHttp {
-	const url = ctx.request.URL;
+export function toCloudflareHttp(ctx: AppContext): CloudflareHttp {
+	const url = new URL(ctx.req.url);
 	const rawSearch = url.search;
 	const query = rawSearch.startsWith("?") ? rawSearch.slice(1) : rawSearch;
 
@@ -135,8 +126,8 @@ export function toCloudflareHttp(ctx: Context): CloudflareHttp {
 	const userAgent = getHeader(ctx, "user-agent");
 	const xForwardedFor = getHeader(ctx, "x-forwarded-for");
 	const host = url.hostname || getHeader(ctx, "host");
-	const method = (ctx.method || "GET").toUpperCase();
-	const version = Number.parseFloat(ctx.req.httpVersion || "1.1") || 1.1;
+	const method = (ctx.req.raw.method || "GET").toUpperCase();
+	const version = 1.1;
 	const fullUri = `${url.pathname}${url.search}`;
 
 	const getParsedQuery = createMemo(() => parseQueryString(rawSearch));

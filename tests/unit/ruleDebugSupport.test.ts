@@ -46,8 +46,8 @@ function makeConfig(): AppConfig {
           {
             id: "inspect-context",
             condition: ({ ctx, http }) =>
-              ctx.validatedClientId === "client-1" &&
-              ctx.geoip?.countryCode === "JP" &&
+              ctx.get("validatedClientId") === "client-1" &&
+              ctx.get("geoip")?.countryCode === "JP" &&
               http.request.cookies["session"]?.[0] === "abc" &&
               http.request.headers.map["content-length"]?.[0] === "5",
             cache: { enabled: true, ttl: 30 },
@@ -80,7 +80,7 @@ async function makeRuntime(): Promise<DebugRuntime> {
 }
 
 describe("ruleDebugSupport - debug context", () => {
-  it("builds a Koa context with site, cookies, headers, client state, geoip, and body metadata", async () => {
+  it("builds a Hono context with site, cookies, headers, client state, geoip, and body metadata", async () => {
     const runtime = await makeRuntime();
     const ctx = createDebugContext(runtime, {
       name: "ctx",
@@ -96,15 +96,15 @@ describe("ruleDebugSupport - debug context", () => {
       bodyLength: 5,
     });
 
-    expect(ctx.currentSiteId).toBe("wiki");
-    expect(ctx.currentSite?.hostname).toEqual(["example.com", "www.example.com"]);
-    expect(ctx.ip).toBe("203.0.113.10");
-    expect(ctx.validatedClientId).toBe("client-1");
-    expect(ctx.geoip?.countryCode).toBe("JP");
-    expect(ctx.request.headers["cookie"]).toBe("session=abc");
-    expect(ctx.request.headers["content-type"]).toBe("application/json");
-    expect(ctx.request.headers["content-length"]).toBe("5");
-    expect((ctx.request as any).rawBody).toBe(".....");
+    expect(ctx.get("currentSiteId")).toBe("wiki");
+    expect(ctx.get("currentSite")?.hostname).toEqual(["example.com", "www.example.com"]);
+    expect(ctx.get("requestIp")).toBe("203.0.113.10");
+    expect(ctx.get("validatedClientId")).toBe("client-1");
+    expect(ctx.get("geoip")?.countryCode).toBe("JP");
+    expect(ctx.req.header("cookie")).toBe("session=abc");
+    expect(ctx.req.header("content-type")).toBe("application/json");
+    expect(ctx.req.header("content-length")).toBe("5");
+    expect(await ctx.req.raw.text()).toBe(".....");
   });
 
   it("runs simulated requests through the real rule engine", async () => {

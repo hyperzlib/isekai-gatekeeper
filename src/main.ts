@@ -52,22 +52,26 @@ async function main() {
 
   // 代理服务器
   const proxyApp = await createProxyApp(cfg, serviceContainer);
-  const proxyServer = proxyApp.listen(cfg.proxy.server_port, () => {
-    console.log(`[proxy] Listening on port ${cfg.proxy.server_port}`);
+  const proxyServer = Bun.serve({
+    port: cfg.proxy.server_port,
+    fetch: proxyApp.fetch,
   });
+  console.log(`[proxy] Listening on port ${cfg.proxy.server_port}`);
 
   // API 服务器
   const apiApp = await createApiApp(cfg, serviceContainer);
-  const apiServer = apiApp.listen(cfg.api.server_port, () => {
-    console.log(`[api] Listening on port ${cfg.api.server_port}`);
+  const apiServer = Bun.serve({
+    port: cfg.api.server_port,
+    fetch: apiApp.fetch,
   });
+  console.log(`[api] Listening on port ${cfg.api.server_port}`);
 
   // 退出时清理资源
   const shutdown = () => {
     console.log("[boot] Shutting down...");
     cleanupService.stop();
-    proxyServer.close();
-    apiServer.close();
+    proxyServer.stop();
+    apiServer.stop();
     proxyService.close();
     templateService.close();
     geoipService.close();

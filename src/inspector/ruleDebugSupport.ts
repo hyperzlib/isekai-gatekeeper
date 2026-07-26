@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { IncomingMessage, ServerResponse } from "node:http";
-import Koa, { type Context } from "koa";
+import { Context } from "hono";
 import type { AppConfig } from "../types/config.ts";
 import type { Decision } from "../types/decision.ts";
 import type { RuleTraceEvent } from "../types/rule.ts";
@@ -11,6 +10,7 @@ import { ProxyService } from "../services/proxyService.ts";
 import { RateLimitService } from "../services/rateLimitService.ts";
 import { RuleEngineService } from "../services/ruleEngineService.ts";
 import { SiteResolver } from "../services/siteResolver.ts";
+import type { AppContext, AppEnv } from "../types/hono.ts";
 
 export type DebugCacheMode = "memory" | "config";
 
@@ -139,54 +139,49 @@ export async function evaluateDebugRequest(
   return {
     decision,
     trace,
-    siteFound: !!ctx.currentSite,
+    siteFound: !!ctx.get("currentSite"),
   };
 }
 
-export function createDebugContext(runtime: DebugRuntime, request: DebugRequestConfig): Context {
+export function createDebugContext(runtime: DebugRuntime, request: DebugRequestConfig): AppContext {
   const normalized = normalizeRequest(request);
-  const app = new Koa();
-  app.proxy = true;
 
   const headers = normalizeHeaders(normalized.headers);
   headers["host"] = normalized.host;
+  headers["x-forwarded-for"] = normalized.clientIp || "127.0.0.1";
   if (normalized.bodyContentType) headers["content-type"] = normalized.bodyContentType;
   if ((normalized.bodyLength ?? 0) > 0) headers["content-length"] = String(normalized.bodyLength);
   const cookieHeader = cookiesToHeader(normalized.cookies);
   if (cookieHeader && !headers["cookie"]) headers["cookie"] = cookieHeader;
 
-  const req = new IncomingMessage(null as any);
-  req.url = normalized.url || "/";
-  req.method = normalized.method || "GET";
-  req.headers = headers;
+  const rawBody = ".".repeat(Math.max(0, Math.floor(normalized.bodyLength ?? 0)));
+  const method = normalized.method || "GET";
+  const absoluteUrl = new URL(normalized.url || "/", `http://${normalized.host}`);
+  const init: RequestInit = { method, headers };
+  if (rawBody && method !== "GET" && method !== "HEAD") {
+    init.body = rawBody;
+  }
+  const ctx = new Context<AppEnv>(new Request(absoluteUrl.toString(), init), {
+    env: {},
+    path: absoluteUrl.pathname,
+  }) as AppContext;
 
-  const res = new ServerResponse(req);
-  const ctx = app.createContext(req, res);
-
-  Object.defineProperty(ctx, "ip", {
-    value: normalized.clientIp || "127.0.0.1",
-    configurable: true,
-  });
-
-  ctx.appConfig = runtime.config;
-  ctx.cacheService = runtime.cacheService;
-  ctx.rateLimitService = runtime.rateLimitService;
-  ctx.siteResolver = runtime.siteResolver;
-  ctx.proxyService = runtime.proxyService;
-  ctx.ruleEngine = runtime.ruleEngine;
-  ctx.geoip = normalized.geoip as Context["geoip"];
-  ctx.validatedClientId = normalized.validatedClientId ?? null;
+  ctx.set("appConfig", runtime.config);
+  ctx.set("cacheService", runtime.cacheService);
+  ctx.set("rateLimitService", runtime.rateLimitService);
+  ctx.set("siteResolver", runtime.siteResolver);
+  ctx.set("proxyService", runtime.proxyService);
+  ctx.set("ruleEngine", runtime.ruleEngine);
+  ctx.set("geoip", normalized.geoip as AppContext["var"]["geoip"]);
+  ctx.set("validatedClientId", normalized.validatedClientId ?? null);
+  ctx.set("requestIp", normalized.clientIp || "127.0.0.1");
 
   const site = runtime.siteResolver.resolve(ctx);
   if (site) {
-    ctx.currentSiteId = site.id;
-    ctx.currentSite = site.config;
-    ctx.currentSiteMatchedHost = site.matchedHost;
+    ctx.set("currentSiteId", site.id);
+    ctx.set("currentSite", site.config);
+    ctx.set("currentSiteMatchedHost", site.matchedHost);
   }
-
-  const rawBody = ".".repeat(Math.max(0, Math.floor(normalized.bodyLength ?? 0)));
-  (ctx.request as any).rawBody = rawBody;
-  (ctx.request as any).body = rawBody;
 
   return ctx;
 }

@@ -70,8 +70,8 @@ const config: AppConfig = {
         headers: {
           "X-Proxy-Server": "isekai-gatekeeper",
           // 兼容 Cloudflare Headers — 使用函数动态计算
-          "CF-IPCountry": ({ ctx }) => ctx.geoip?.countryCode ?? "XX",
-          "CF-Visitor": ({ ctx }) => JSON.stringify({ scheme: ctx.protocol }),
+          "CF-IPCountry": ({ ctx }) => ctx.get("geoip")?.countryCode ?? "XX",
+          "CF-Visitor": ({ ctx }) => JSON.stringify({ scheme: new URL(ctx.req.url).protocol.replace(/:$/, "") }),
         },
       },
       rules: [
@@ -117,7 +117,7 @@ const config: AppConfig = {
         {
           id: "allow-cn",
           description: "allow traffic from China",
-          condition: ({ ctx }) => ctx.geoip?.countryCode === "CN",
+          condition: ({ ctx }) => ctx.get("geoip")?.countryCode === "CN",
           browser_challenge: { enabled: false },
         },
       ],

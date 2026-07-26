@@ -1,7 +1,4 @@
 import { gunzipSync, brotliDecompressSync, inflateSync } from "node:zlib";
-import { Readable } from "node:stream";
-import type { OutgoingHttpHeaders } from "node:http";
-import type Koa from "koa";
 import type { AppConfig, SiteConfig } from "../types/config.ts";
 import type { CacheService } from "./cacheService.ts";
 import type { Decision } from "../types/decision.ts";
@@ -12,29 +9,8 @@ import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
 import { ruleExpressionTools } from "../utils/RuleTools.ts";
 import { toCloudflareHttp } from "../utils/http.ts";
 import { SiteResolver } from "./siteResolver.ts";
-
-/**
- * 将 Node.js Readable stream 转为 Web ReadableStream，
- * 用于透传文件上传等流式请求体到 fetch。
- */
-function nodeStreamToReadableStream(nodeStream: Readable): ReadableStream<Uint8Array> {
-  if (nodeStream.readableFlowing) {
-    // 已被消费为 flowing 模式，用 Readable.toWeb 直接转换
-    return Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
-  }
-  return new ReadableStream({
-    start(controller) {
-      nodeStream.on("data", (chunk: Buffer) => {
-        controller.enqueue(chunk);
-      });
-      nodeStream.on("end", () => controller.close());
-      nodeStream.on("error", (err) => controller.error(err));
-    },
-    cancel() {
-      nodeStream.destroy();
-    },
-  });
-}
+import type { AppContext, RuleContext } from "../types/hono.ts";
+import { getRequestHost, getRequestIp, getRequestProtocol } from "../utils/request.ts";
 
 /**
  * 渲染后端请求头。string 直接使用，函数接收 RuleInput 上下文后返回值。
@@ -58,7 +34,7 @@ function renderHeaders(
   return result;
 }
 
-function decodeContentEncoding(body: Buffer, encoding: string): Buffer {
+function decodeContentEncoding(body: Buffer<ArrayBufferLike>, encoding: string): Buffer<ArrayBufferLike> {
   encoding = encoding.toLowerCase().trim();
   if (encoding === "gzip") {
     return gunzipSync(body);
@@ -83,19 +59,29 @@ function isTextContentType(contentType: string): boolean {
   );
 }
 
-function sendCachedResponse(ctx: Koa.Context, cached: CachedResponse, age: number): void {
-  const cacheAge = Math.floor(age / 1000).toString();
-  const headers: OutgoingHttpHeaders = {
-    ...cached.headers,
-    "x-cache": "HIT",
-    "x-cache-age": cacheAge,
-    "age": cacheAge,
-    "expires": new Date(cached.cachedAt + cached.ttl * 1000).toUTCString(),
-  };
+function appendHeader(headers: Headers, key: string, rawValue: string | string[]): void {
+  if (Array.isArray(rawValue)) {
+    for (const value of rawValue) headers.append(key, value);
+  } else {
+    headers.set(key, rawValue);
+  }
+}
 
-  ctx.respond = false;
-  ctx.res.writeHead(cached.status, headers);
-  ctx.res.end(cached.body);
+function sendCachedResponse(cached: CachedResponse, age: number): Response {
+  const cacheAge = Math.floor(age / 1000).toString();
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(cached.headers)) {
+    appendHeader(headers, key, value);
+  }
+  headers.set("x-cache", "HIT");
+  headers.set("x-cache-age", cacheAge);
+  headers.set("age", cacheAge);
+  headers.set("expires", new Date(cached.cachedAt + cached.ttl * 1000).toUTCString());
+
+  return new Response(cached.body, {
+    status: cached.status,
+    headers,
+  });
 }
 
 export class ProxyService {
@@ -114,110 +100,93 @@ export class ProxyService {
   /**
    * 按 Host 头匹配 site。
    */
-  selectSite(ctx: Koa.Context): { id: string; config: SiteConfig } | null {
-    return this.siteResolver.resolve(ctx);
+  selectSite(ctx: AppContext): { id: string; config: SiteConfig } | null {
+    const site = this.siteResolver.resolve(ctx);
+    return site ? { id: site.id, config: site.config } : null;
   }
 
   /**
-   * 转发请求到后端，可选缓存响应。使用 fetch + pipe。
+   * 转发请求到后端，可选缓存响应。使用 Fetch API 直接返回 Hono Response。
    */
-  async forward(ctx: Koa.Context, site: SiteConfig, decision: Decision): Promise<void> {
-    const shouldCache = decision.cache?.enabled && ctx.method === "GET";
+  async forward(ctx: AppContext, site: SiteConfig, decision: Decision): Promise<Response> {
+    const method = ctx.req.raw.method.toUpperCase();
+    const shouldCache = decision.cache?.enabled && method === "GET";
 
-    // 如果应该缓存，先尝试从缓存中获取
     if (shouldCache) {
       const cached = await this.cacheService.getCachedResponse(decision.cache_key);
       if (cached) {
         const now = Date.now();
         const age = now - cached.cachedAt;
         if (age < cached.ttl * 1000) {
-          sendCachedResponse(ctx, cached, age);
-          return;
+          return sendCachedResponse(cached, age);
         }
       }
     }
 
-    // 构建后端请求 URL
-    const targetUrl = site.backend.url.replace(/\/$/, "") + ctx.url;
+    const requestUrl = new URL(ctx.req.url);
+    const targetUrl = site.backend.url.replace(/\/$/, "") + requestUrl.pathname + requestUrl.search;
+    const ip = getRequestIp(ctx);
+    const protocol = getRequestProtocol(ctx);
+    const originalHost = getRequestHost(ctx);
 
-    // 收集需要转发到后端的请求头（排除 hop-by-hop 头）
-    const forwardHeaders: Record<string, string> = {
-      "x-forwarded-for": ctx.ip,
-      "x-forwarded-proto": ctx.protocol,
-      "x-forwarded-host": ctx.headers["host"] ?? "",
-      "forwarded": `by=isekai-gatekeeper; for=${ctx.ip}; proto=${ctx.protocol}; host=${ctx.headers["host"] ?? ""}`,
-    };
+    const forwardHeaders = new Headers({
+      "x-forwarded-for": ip,
+      "x-forwarded-proto": protocol,
+      "x-forwarded-host": originalHost,
+      "forwarded": `by=isekai-gatekeeper; for=${ip}; proto=${protocol}; host=${originalHost}`,
+    });
 
-    // 透传客户端的非 hop-by-hop 头
     const hopByHop = new Set([
       "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
       "te", "trailers", "transfer-encoding", "upgrade",
     ]);
-    for (const [k, v] of Object.entries(ctx.headers)) {
-      if (!hopByHop.has(k.toLowerCase()) && !forwardHeaders[k.toLowerCase()]) {
-        forwardHeaders[k] = Array.isArray(v) ? v.join(", ") : v ?? "";
+    for (const [key, value] of ctx.req.raw.headers.entries()) {
+      const lowerKey = key.toLowerCase();
+      if (!hopByHop.has(lowerKey) && !forwardHeaders.has(lowerKey)) {
+        forwardHeaders.set(key, value);
       }
     }
 
     if (site.backend.hostname) {
-      forwardHeaders["host"] = site.backend.hostname;
+      forwardHeaders.set("host", site.backend.hostname);
     }
     if (site.backend.headers) {
+      let state = ctx.get("ruleEngineState");
+      if (!state) {
+        state = {};
+        ctx.set("ruleEngineState", state);
+      }
       const exprGlobal = {
-        ctx,
+        ctx: ctx as RuleContext,
         http: toCloudflareHttp(ctx),
         presets: new RulePresets(ctx),
         rateLimit: new RuleRateLimit(ctx),
-        state: ctx.state.ruleEngineState ?? {},
+        state,
         ...ruleExpressionTools,
       };
-      Object.assign(forwardHeaders, renderHeaders(site.backend.headers, exprGlobal as unknown as RuleInput));
-    }
-
-    // 请求体转发：multipart（文件上传）→ 流式转发；JSON/form → 字符串化
-    const rawContentTypeHeader = typeof ctx.headers["content-type"] === "string" ? ctx.headers["content-type"] : "";
-    const contentType = (ctx.request.type ?? rawContentTypeHeader ?? "").toLowerCase();
-    const isMultipart = contentType.startsWith("multipart/form-data");
-    const isStreamableBody = ctx.method !== "GET" && ctx.method !== "HEAD";
-
-    let body: string | ReadableStream<Uint8Array> | undefined;
-    if (isStreamableBody) {
-      if (isMultipart) {
-        // 文件上传：直接透传原始流
-        if (rawContentTypeHeader) {
-          // multipart/form-data 需要保留 boundary 参数，否则上游无法解析。
-          forwardHeaders["content-type"] = rawContentTypeHeader;
-        }
-        body = nodeStreamToReadableStream(ctx.req);
-      } else if (ctx.request.body && ctx.request.rawBody) {
-        // 文本类型的 body（如 JSON、表单）
-        body = ctx.request.rawBody;
-        forwardHeaders["content-type"] = contentType || "application/json";
-      } else {
-        // 未知的流式 body（如 application/octet-stream）
-        forwardHeaders["content-type"] = contentType || "application/octet-stream";
-        body = nodeStreamToReadableStream(ctx.req);
+      const renderedHeaders = renderHeaders(site.backend.headers, exprGlobal as RuleInput);
+      for (const [key, value] of Object.entries(renderedHeaders)) {
+        forwardHeaders.set(key, value);
       }
     }
+
+    const body = method !== "GET" && method !== "HEAD" ? ctx.req.raw.body : undefined;
 
     let resp: Response;
     try {
       resp = await fetch(targetUrl, {
-        method: ctx.method,
+        method,
         headers: forwardHeaders,
         body,
         redirect: "manual",
       });
     } catch (err) {
       console.error("[ProxyService] fetch error:", err);
-      ctx.status = 502;
-      ctx.body = "Bad Gateway";
-      return;
+      return new Response("Bad Gateway", { status: 502 });
     }
 
-    // 复制状态码和响应头到 client
-    ctx.status = resp.status;
-    const responseHeaders: Record<string, string[]> = {};
+    const responseHeaders = new Headers();
+    const cachedResponseHeaders: Record<string, string[]> = {};
     const responseHopByHop = new Set([
       "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
       "te", "trailers", "transfer-encoding", "upgrade", "content-encoding", "content-length",
@@ -225,24 +194,19 @@ export class ProxyService {
     resp.headers.forEach((value, key) => {
       const lowerKey = key.toLowerCase();
       if (!responseHopByHop.has(lowerKey)) {
-        if (!Array.isArray(responseHeaders[lowerKey])) {
-          responseHeaders[lowerKey] = [];
-        }
-        responseHeaders[lowerKey].push(value);
+        responseHeaders.append(lowerKey, value);
+        cachedResponseHeaders[lowerKey] ??= [];
+        cachedResponseHeaders[lowerKey]!.push(value);
       }
     });
-    for (const [k, v] of Object.entries(responseHeaders)) {
-      ctx.set(k, v);
-    }
 
-    // 缓存逻辑
     if (shouldCache && resp.body) {
       let contentType = resp.headers.get("content-type") ?? "";
       if (contentType.includes(";")) {
         contentType = contentType.split(";")[0]?.trim() ?? "";
       }
 
-      ctx.set("X-Cache", "MISS");
+      responseHeaders.set("x-cache", "MISS");
 
       const allowedStatuses = [200, 301, 308];
       const cacheableTextResponse =
@@ -250,28 +214,20 @@ export class ProxyService {
         this.appConfig.cache.allowed_mimetypes.includes(contentType) &&
         isTextContentType(contentType);
       if (cacheableTextResponse) {
-        ctx.set("X-Cache-Reason", "MISS_CACHEABLE");
+        responseHeaders.set("x-cache-reason", "MISS_CACHEABLE");
         try {
-          const chunks: Buffer[] = [];
-          const reader = resp.body.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(Buffer.from(value));
-          }
-          const rawBody: Buffer = Buffer.concat(chunks);
+          const rawBody: Buffer<ArrayBufferLike> = Buffer.from(await resp.arrayBuffer());
 
-          // 解压缩
           const contentEncoding = (resp.headers.get("content-encoding") ?? "").toLowerCase().trim();
           let bodyBuffer = rawBody;
-          const cachedHeaders = { ...responseHeaders };
+          const cachedHeaders = { ...cachedResponseHeaders };
           if (contentEncoding) {
             try {
               bodyBuffer = decodeContentEncoding(rawBody, contentEncoding);
               delete cachedHeaders["content-encoding"];
               cachedHeaders["content-length"] = [String(bodyBuffer.length)];
             } catch {
-              // 解压失败，保留原始数据
+              // 解压失败时保留原始数据。
             }
           }
 
@@ -287,41 +243,29 @@ export class ProxyService {
           }, decision.cache?.ttl ?? this.appConfig.cache.default_ttl, cacheTags);
 
           if (this.appConfig.debug) {
-            console.log(`[ProxyService] Cached: ${resp.status} ${ctx.url} (key: ${decision.cache_key})`);
+            console.log(`[ProxyService] Cached: ${resp.status} ${requestUrl.pathname}${requestUrl.search} (key: ${decision.cache_key})`);
           }
 
-          ctx.body = bodyText;
-          return;
+          return new Response(bodyText, {
+            status: resp.status,
+            headers: responseHeaders,
+          });
         } catch (err) {
           console.error("[ProxyService] Failed to cache response:", err);
         }
       } else {
-        ctx.set("X-Cache-Reason", isTextContentType(contentType) ? "UNCACHEABLE" : "UNCACHEABLE_NON_TEXT");
+        responseHeaders.set("x-cache-reason", isTextContentType(contentType) ? "UNCACHEABLE" : "UNCACHEABLE_NON_TEXT");
       }
     }
 
-    // 非缓存路径：直接将 fetch 的 body stream pipe 到 Koa response
-    if (resp.body) {
-      // 将 Web ReadableStream 转为 Node.js Readable 并设置到 body
-      ctx.body = Readable.from(
-        (async function* () {
-          const reader = (resp.body as ReadableStream<Uint8Array>).getReader();
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              yield value;
-            }
-          } finally {
-            reader.releaseLock();
-          }
-        })(),
-      );
+    if (this.appConfig.debug) {
+      console.log(`[ProxyService] Forwarded: ${method} ${requestUrl.pathname}${requestUrl.search} -> ${resp.status}`);
     }
 
-    if (this.appConfig.debug) {
-      console.log(`[ProxyService] Forwarded: ${ctx.method} ${ctx.url} → ${resp.status}`);
-    }
+    return new Response(resp.body, {
+      status: resp.status,
+      headers: responseHeaders,
+    });
   }
 
   close(): void {

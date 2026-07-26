@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import type { Context } from "koa";
+import { Context } from "hono";
 import { RateLimitService, type RateLimitGroupBy } from "../../src/services/rateLimitService.ts";
+import type { AppContext, AppEnv } from "../../src/types/hono.ts";
 
 type StoredValue = {
   value: unknown;
@@ -86,14 +87,22 @@ function makeService(fakeCache: FakeCacheService): RateLimitService {
   return new RateLimitService(fakeCache as unknown as any);
 }
 
-function makeCtx(overrides: Partial<Context> = {}): Context {
-  const base = {
-    ip: "1.2.3.4",
-    URL: { pathname: "/foo" },
-    geoip: { asn: 64512, countryCode: "cn" },
-    validatedClientId: "client-a",
-  };
-  return { ...base, ...overrides } as unknown as Context;
+function makeCtx(overrides: {
+  ip?: string;
+  path?: string;
+  geoip?: unknown;
+  validatedClientId?: string | null;
+} = {}): AppContext {
+  const ip = overrides.ip ?? "1.2.3.4";
+  const path = overrides.path ?? "/foo";
+  const url = new URL(path, "http://test.com");
+  const ctx = new Context<AppEnv>(new Request(url.toString(), {
+    headers: { host: "test.com", "x-forwarded-for": ip },
+  }), { env: {}, path: url.pathname }) as AppContext;
+  ctx.set("requestIp", ip);
+  ctx.set("geoip", (overrides.geoip ?? { asn: 64512, countryCode: "cn" }) as AppContext["var"]["geoip"]);
+  ctx.set("validatedClientId", "validatedClientId" in overrides ? overrides.validatedClientId : "client-a");
+  return ctx;
 }
 
 describe("RateLimitService - consume", () => {
@@ -233,7 +242,7 @@ describe("RateLimitService - wrappers and cleanup", () => {
 describe("RateLimitService - buildGroupKey", () => {
   type Case = {
     groupBy: RateLimitGroupBy;
-    ctx: Context;
+    ctx: AppContext;
     expected: string;
   };
 

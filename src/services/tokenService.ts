@@ -1,6 +1,7 @@
-import type Koa from "koa";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { hmacSha256Hex, timingSafeEqual } from "../lib/crypto.ts";
 import { randomUUID } from "crypto";
+import type { AppContext } from "../types/hono.ts";
 
 export const TOKEN_COOKIE_NAME = "isekai_gatekeeper_token";
 
@@ -8,17 +9,17 @@ export const TOKEN_COOKIE_NAME = "isekai_gatekeeper_token";
  * 签发验证通过 Cookie。
  * 格式：<unix_ts>.<HMAC-SHA256(unix_ts, secret)>
  */
-export async function issueChallengePassCookie(ctx: Koa.Context, clientId?: string): Promise<void> {
+export async function issueChallengePassCookie(ctx: AppContext, clientId?: string): Promise<void> {
   clientId ??= randomUUID();
 
   const ts = Math.floor(Date.now() / 1000).toString();
-  const sig = await hmacSha256Hex(`${clientId}.${ts}`, ctx.appConfig.browser_challenge.secret);
+  const appConfig = ctx.get("appConfig");
+  const sig = await hmacSha256Hex(`${clientId}.${ts}`, appConfig.browser_challenge.secret);
   const value = `${clientId}.${ts}.${sig}`;
-  ctx.cookies.set(TOKEN_COOKIE_NAME, value, {
+  setCookie(ctx, TOKEN_COOKIE_NAME, value, {
     httpOnly: true,
-    sameSite: "lax",
-    maxAge: ctx.appConfig.browser_challenge.cookie_ttl * 1000,
-    overwrite: true,
+    sameSite: "Lax",
+    maxAge: appConfig.browser_challenge.cookie_ttl,
   });
 }
 
@@ -28,9 +29,9 @@ export async function issueChallengePassCookie(ctx: Koa.Context, clientId?: stri
  * @returns 验证通过的 clientId，或 null（无效/过期）。
  */
 export async function validateChallengePassCookie(
-  ctx: Koa.Context,
+  ctx: AppContext,
 ): Promise<string | null> {
-  const raw = ctx.cookies.get(TOKEN_COOKIE_NAME);
+  const raw = getCookie(ctx, TOKEN_COOKIE_NAME);
   if (!raw) return null;
 
   const dotIdx = raw.lastIndexOf(".");
@@ -46,10 +47,11 @@ export async function validateChallengePassCookie(
   const tsNum = parseInt(ts, 10);
   if (isNaN(tsNum)) return null;
 
+  const appConfig = ctx.get("appConfig");
   const now = Math.floor(Date.now() / 1000);
-  if (now - tsNum > ctx.appConfig.browser_challenge.cookie_ttl) return null;
+  if (now - tsNum > appConfig.browser_challenge.cookie_ttl) return null;
 
-  const expected = await hmacSha256Hex(`${clientId}.${ts}`, ctx.appConfig.browser_challenge.secret);
+  const expected = await hmacSha256Hex(`${clientId}.${ts}`, appConfig.browser_challenge.secret);
   if (!timingSafeEqual(expected, sig)) {
     return null;
   }
@@ -57,11 +59,9 @@ export async function validateChallengePassCookie(
   return clientId;
 }
 
-export function clearChallengePassCookie(ctx: Koa.Context): void {
-  ctx.cookies.set(TOKEN_COOKIE_NAME, "", {
+export function clearChallengePassCookie(ctx: AppContext): void {
+  deleteCookie(ctx, TOKEN_COOKIE_NAME, {
     httpOnly: true,
-    sameSite: "lax",
-    expires: new Date(0),
-    overwrite: true,
+    sameSite: "Lax",
   });
 }

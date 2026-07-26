@@ -1,9 +1,10 @@
-import type Koa from "koa";
 import { generateChallenge, verifyChallengeToken, verifyPow } from "../services/challengeService.ts";
 import { issueChallengePassCookie } from "../services/tokenService.ts";
 import { CaptchaError, CaptchaErrorKind } from "../services/captchaService.ts";
 import type { CaptchaConfig, FunCaptchaProviderConfig, GeeTestProviderConfig, RecaptchaProviderConfig, TencentProviderConfig } from "../types/config.ts";
 import { CHALLENGE_PATH_PREFIX } from "../routes/challengeRoutes.ts";
+import type { AppContext } from "../types/hono.ts";
+import { getRequestIp } from "../utils/request.ts";
 
 /**
  * 从验证码配置提取仅前端必需的公开字段
@@ -46,12 +47,12 @@ export function getCaptchaPublicConfig(captcha: CaptchaConfig | undefined): Reco
  * GET /.isekai-gatekeeper/challenge
  * 返回 PoW 挑战 JSON。
  */
-export const getChallenge = async (ctx: Koa.Context) => {
-  const payload = await generateChallenge(ctx.appConfig.browser_challenge);
-  ctx.body = payload;
+export const getChallenge = async (ctx: AppContext) => {
+  const payload = await generateChallenge(ctx.get("appConfig").browser_challenge);
+  return ctx.json(payload);
 };
 
-export const verifyPowChallenge = async (ctx: Koa.Context, body: Record<string, unknown>) => {
+export const verifyPowChallenge = async (ctx: AppContext, body: Record<string, unknown>) => {
   const challenge = body["challenge"];
   const nonce = body["nonce"];
   const token = body["token"];
@@ -63,42 +64,35 @@ export const verifyPowChallenge = async (ctx: Koa.Context, body: Record<string, 
     typeof token !== "string" ||
     typeof expires !== "number"
   ) {
-    ctx.status = 400;
-    ctx.body = { error: "Invalid request body" };
-    return;
+    return ctx.json({ error: "Invalid request body" }, 400);
   }
 
   // 验证 token 合法性（防伪造挑战）
+  const appConfig = ctx.get("appConfig");
   const tokenValid = await verifyChallengeToken(
     challenge,
     expires,
     token,
-    ctx.appConfig.browser_challenge.secret,
+    appConfig.browser_challenge.secret,
   );
   if (!tokenValid) {
-    ctx.status = 403;
-    ctx.body = { error: "Invalid or expired challenge token" };
-    return;
+    return ctx.json({ error: "Invalid or expired challenge token" }, 403);
   }
 
   // 验证 PoW
-  const powValid = await verifyPow(challenge, nonce, ctx.appConfig.browser_challenge.pow.difficulty);
+  const powValid = await verifyPow(challenge, nonce, appConfig.browser_challenge.pow.difficulty);
   if (!powValid) {
-    ctx.status = 403;
-    ctx.body = { error: "Proof-of-work verification failed" };
-    return;
+    return ctx.json({ error: "Proof-of-work verification failed" }, 403);
   }
 
   await issueChallengePassCookie(ctx);
-  ctx.body = { success: true };
+  return ctx.json({ success: true });
 }
 
-export const verifyCaptchaChallenge = async (ctx: Koa.Context, body: Record<string, unknown>) => {
+export const verifyCaptchaChallenge = async (ctx: AppContext, body: Record<string, unknown>) => {
   const token = body["captcha_token"];
   if (typeof token !== "string") {
-    ctx.status = 400;
-    ctx.body = { error: "Invalid request body" };
-    return;
+    return ctx.json({ error: "Invalid request body" }, 400);
   }
 
   const extra: Record<string, string> = {};
@@ -109,38 +103,32 @@ export const verifyCaptchaChallenge = async (ctx: Koa.Context, body: Record<stri
   }
 
   try {
-    const result = await ctx.captchaService.verify({
+    const result = await ctx.get("captchaService").verify({
       token,
-      remoteIp: ctx.ip,
+      remoteIp: getRequestIp(ctx),
       extra,
     });
 
     if (!result.success) {
-      ctx.status = 403;
-      ctx.body = { error: "Captcha verification failed" };
-      return;
+      return ctx.json({ error: "Captcha verification failed" }, 403);
     }
 
     await issueChallengePassCookie(ctx);
-    ctx.body = { success: true };
+    return ctx.json({ success: true });
   } catch (err) {
     if (err instanceof CaptchaError) {
       if (err.kind === CaptchaErrorKind.Config) {
         console.error("[captcha] Config error:", err.message);
-        ctx.status = 500;
-        ctx.body = { error: "Captcha service misconfigured" };
+        return ctx.json({ error: "Captcha service misconfigured" }, 500);
       } else if (err.kind === CaptchaErrorKind.Network) {
         console.error("[captcha] Network error:", err.message);
-        ctx.status = 502;
-        ctx.body = { error: "Captcha service unavailable" };
+        return ctx.json({ error: "Captcha service unavailable" }, 502);
       } else {
-        ctx.status = 403;
-        ctx.body = { error: err.message };
+        return ctx.json({ error: err.message }, 403);
       }
     } else {
       console.error("[captcha] Unexpected error:", err);
-      ctx.status = 500;
-      ctx.body = { error: "Internal error" };
+      return ctx.json({ error: "Internal error" }, 500);
     }
   }
 };
@@ -149,20 +137,21 @@ export const verifyCaptchaChallenge = async (ctx: Koa.Context, body: Record<stri
  * POST /.isekai-gatekeeper/verify
  * 验证 PoW 或验证码，成功则签发 Cookie。
  */
-export const verifyChallenge = async (ctx: Koa.Context) => {
-  const body = ctx.request.body as Record<string, unknown>;
+export const verifyChallenge = async (ctx: AppContext) => {
+  let body: Record<string, unknown>;
+  try {
+    body = await ctx.req.json();
+  } catch {
+    return ctx.json({ error: "Invalid request body" }, 400);
+  }
 
   switch (body["type"]) {
     case "pow":
-      await verifyPowChallenge(ctx, body);
-      break;
+      return verifyPowChallenge(ctx, body);
     case "captcha":
-      await verifyCaptchaChallenge(ctx, body);
-      break;
+      return verifyCaptchaChallenge(ctx, body);
     default:
-      ctx.status = 400;
-      ctx.body = { error: "Invalid challenge type" };
-      break;
+      return ctx.json({ error: "Invalid challenge type" }, 400);
   }
 };
 
@@ -170,19 +159,17 @@ export const verifyChallenge = async (ctx: Koa.Context) => {
  * GET /.isekai-gatekeeper/
  * 渲染挑战页面（Handlebars 模板）。
  */
-export const renderChallengePage = (ctx: Koa.Context) => {
-  let redirect = (ctx.query["redirect"] as string | undefined) ?? ".";
+export const renderChallengePage = (ctx: AppContext) => {
+  let redirect = ctx.req.query("redirect") ?? ".";
 
-  if (redirect === "." && ctx.URL.pathname.startsWith(CHALLENGE_PATH_PREFIX)) {
+  if (redirect === "." && ctx.req.path.startsWith(CHALLENGE_PATH_PREFIX)) {
     // 如果没有指定 redirect，且当前路径是挑战相关路径，则默认重定向到根路径，避免重定向回挑战页面导致死循环。
     redirect = "/";
   }
 
-  const publicCfg = getCaptchaPublicConfig(ctx.appConfig.captcha);
+  const publicCfg = getCaptchaPublicConfig(ctx.get("appConfig").captcha);
 
-  ctx.status = 403;
-  
-  const template = ctx.tpl.create("challenge");
+  const template = ctx.get("tpl").create("challenge");
 
   template.assign('challengeConfig', {
     challengeApi: "/.isekai-gatekeeper/challenge",
@@ -195,5 +182,5 @@ export const renderChallengePage = (ctx: Koa.Context) => {
     template.assign('enableCaptcha', true);
   }
 
-  template.flush(ctx);
+  return template.toResponse(403);
 };

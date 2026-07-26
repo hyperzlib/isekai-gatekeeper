@@ -1,20 +1,17 @@
 import { createChallengeRouter, createStaticMiddleware } from "./challengeRoutes.ts";
 import { createAdminRouter } from "./adminRoutes.ts";
-import type Koa from "koa";
+import type { Hono } from "hono";
+import type { AppEnv } from "../types/hono.ts";
 
 export function registerProxyRoutes(
-  app: Koa,
+  app: Hono<AppEnv>,
 ): void {
-  const challengeRouter = createChallengeRouter();
-  app.use(createStaticMiddleware());
-  app.use(challengeRouter.routes());
-  app.use(challengeRouter.allowedMethods());
+  createStaticMiddleware(app);
+  createChallengeRouter(app);
 }
 
 export function registerAdminRoutes(
-  app: Koa,
+  app: Hono<AppEnv>,
 ): void {
-  const adminRouter = createAdminRouter();
-  app.use(adminRouter.routes());
-  app.use(adminRouter.allowedMethods());
+  createAdminRouter(app);
 }

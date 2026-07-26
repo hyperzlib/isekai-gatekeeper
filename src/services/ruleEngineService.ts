@@ -1,4 +1,3 @@
-import Koa, { Context } from "koa";
 import type { SiteConfig, AppConfig } from "../types/config.ts";
 import type {
   RuleActionCachePolicy, RuleActionReturn, RuleConfig,
@@ -14,10 +13,12 @@ import { makePageCacheKey } from "../utils/cache.ts";
 import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
 import { ruleExpressionTools } from "../utils/RuleTools.ts";
 import { SiteResolver } from "./siteResolver.ts";
+import type { AppContext, RuleContext } from "../types/hono.ts";
+import { getRequestHost } from "../utils/request.ts";
 
 /** Runtime evaluation context passed to rule functions */
 type ExpressionGlobal = RuleInput & {
-  ctx: Context;
+  ctx: RuleContext;
   http: CloudflareHttp;
   presets: RulePresets;
   rateLimit: RuleRateLimit;
@@ -60,10 +61,13 @@ export class RuleEngineService {
   }
 
   /** 对请求上下文执行 multi-match 规则评估，返回合并决策。 */
-  async evaluate(ctx: Context, options: RuleEvaluateOptions = {}): Promise<Decision> {
+  async evaluate(ctx: AppContext, options: RuleEvaluateOptions = {}): Promise<Decision> {
     const trace = options.trace;
-    const resolvedSite = ctx.currentSite && ctx.currentSiteId
-      ? { id: ctx.currentSiteId, config: ctx.currentSite, matchedHost: ctx.currentSiteMatchedHost ?? String(ctx.request.headers["host"] ?? "") }
+    const currentSite = ctx.get("currentSite");
+    const currentSiteId = ctx.get("currentSiteId");
+    const url = new URL(ctx.req.url);
+    const resolvedSite = currentSite && currentSiteId
+      ? { id: currentSiteId, config: currentSite, matchedHost: ctx.get("currentSiteMatchedHost") ?? getRequestHost(ctx) }
       : this.siteResolver.resolve(ctx);
     const entry: CompiledSite | undefined = resolvedSite
       ? { rules: resolvedSite.config.rules ?? [], siteConfig: resolvedSite.config }
@@ -81,7 +85,7 @@ export class RuleEngineService {
 
     trace?.({
       type: "site",
-      hostname: resolvedSite?.matchedHost ?? String(ctx.request.headers["host"] ?? ""),
+      hostname: resolvedSite?.matchedHost ?? getRequestHost(ctx),
       matched: !!entry,
       siteHostname: entry?.siteConfig.hostname,
     });
@@ -91,7 +95,7 @@ export class RuleEngineService {
         block: false,
         cache: defaultCachePolicy,
         browser_challenge: defaultChallenge,
-        cache_key: makePageCacheKey(ctx.currentSiteId || resolvedSite?.id || "unknown", ctx.URL.pathname, ctx.URL.search, defaultCachePolicy.cache_key_mode),
+        cache_key: makePageCacheKey(currentSiteId || resolvedSite?.id || "unknown", url.pathname, url.search, defaultCachePolicy.cache_key_mode),
       };
       trace?.({ type: "default_decision", decision });
       trace?.({ type: "final_decision", decision });
@@ -104,13 +108,17 @@ export class RuleEngineService {
     let browserChallengePolicy: BrowserChallengePolicy = { ...defaultChallenge };
     const matchedCallbacks: { ruleId: string; callback: CacheTagsCallback }[] = [];
 
-    ctx.state.ruleEngineState ??= {};
+    let state = ctx.get("ruleEngineState");
+    if (!state) {
+      state = {};
+      ctx.set("ruleEngineState", state);
+    }
     const expressionGlobal: ExpressionGlobal = {
-      ctx,
+      ctx: ctx as RuleContext,
       http: toCloudflareHttp(ctx),
       presets: new RulePresets(ctx),
       rateLimit: new RuleRateLimit(ctx),
-      state: ctx.state.ruleEngineState,
+      state,
       ...ruleExpressionTools,
     } as ExpressionGlobal;
 
@@ -244,9 +252,9 @@ export class RuleEngineService {
     }
 
     const cacheKey = makePageCacheKey(
-      ctx.currentSiteId || resolvedSite?.id || "unknown",
-      ctx.URL.pathname,
-      ctx.URL.search,
+      currentSiteId || resolvedSite?.id || "unknown",
+      url.pathname,
+      url.search,
       cachePolicy.cache_key_mode ?? defaultCachePolicy.cache_key_mode,
     );
 

@@ -1,11 +1,8 @@
-import Router from "@koa/router";
 import { deleteCache, listCachedPages } from "../controllers/cacheController.ts";
+import type { Hono } from "hono";
+import type { AppEnv } from "../types/hono.ts";
 
-export function createAdminRouter(): Router {
-  const router = new Router({ prefix: "/api/v1" });
-
-  router.post("/delete_cache", deleteCache);
-  router.post("/list_cached_pages", listCachedPages);
-
-  return router;
+export function createAdminRouter(app: Hono<AppEnv>): void {
+  app.post("/api/v1/delete_cache", deleteCache);
+  app.post("/api/v1/list_cached_pages", listCachedPages);
 }

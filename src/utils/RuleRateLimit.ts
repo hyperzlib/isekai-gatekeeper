@@ -1,5 +1,5 @@
-import { Context } from "koa";
 import { RateLimitGroupBy } from "../services/rateLimitService";
+import type { AppContext } from "../types/hono";
 
 /**
  * 用于规则表达式中限流相关规则
@@ -7,7 +7,7 @@ import { RateLimitGroupBy } from "../services/rateLimitService";
 export class RuleRateLimit {
   private requestNumCache: Record<string, number> = {};
 
-  constructor(private readonly ctx: Context) { }
+  constructor(private readonly ctx: AppContext) { }
 
   public async isLimited(groupBy: RateLimitGroupBy, maxRequests: number = 10, windowSec: number = 60): Promise<boolean> {
     const cacheKey = `${groupBy}:${windowSec}`;
@@ -15,15 +15,15 @@ export class RuleRateLimit {
       return this.requestNumCache[cacheKey] >= maxRequests;
     }
 
-    const key = this.ctx.rateLimitService.buildGroupKey(this.ctx, groupBy);
-    const result = await this.ctx.rateLimitService.consume({ key, windowSec, maxRequests });
+    const key = this.ctx.get("rateLimitService").buildGroupKey(this.ctx, groupBy);
+    const result = await this.ctx.get("rateLimitService").consume({ key, windowSec, maxRequests });
     this.requestNumCache[cacheKey] = result.current;
     return result.limited;
   }
 
   public async reset(groupBy: RateLimitGroupBy, windowSec?: number): Promise<void> {
-    const key = this.ctx.rateLimitService.buildGroupKey(this.ctx, groupBy);
-    await this.ctx.rateLimitService.reset(key, windowSec);
+    const key = this.ctx.get("rateLimitService").buildGroupKey(this.ctx, groupBy);
+    await this.ctx.get("rateLimitService").reset(key, windowSec);
     if (windowSec !== undefined) {
       const cacheKey = `${groupBy}:${windowSec}`;
       delete this.requestNumCache[cacheKey];

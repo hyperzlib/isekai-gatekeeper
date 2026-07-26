@@ -1,26 +1,23 @@
-import Koa from "koa";
+import type { MiddlewareHandler } from "hono";
 import { CHALLENGE_PATH_PREFIX } from "../routes/challengeRoutes";
+import type { AppEnv } from "../types/hono.ts";
 
-export const reverseProxyMiddleware: Koa.Middleware = async (ctx, next) => {
-  // 挑战路径直接透传（由 challengeRoutes 处理）
-  if (ctx.path.startsWith(CHALLENGE_PATH_PREFIX)) {
-    return next();
-  }
-
-  if (!ctx.currentSite || !ctx.decision) {
-    ctx.status = 500;
-    ctx.body = "Site configuration or decision missing";
+export const reverseProxyMiddleware: MiddlewareHandler<AppEnv> = async (ctx, next) => {
+  // 挑战路由直接透传（由 challengeRoutes 处理）
+  if (ctx.req.path.startsWith(CHALLENGE_PATH_PREFIX)) {
+    await next();
     return;
   }
 
-  const site = ctx.currentSite;
-  const decision = ctx.decision;
-
-  if (ctx.appConfig.cache.bypass_after_challenge) {
-    if (ctx.validatedClientId) {
-      decision.cache = { enabled: false };
-    }
+  const site = ctx.get("currentSite");
+  const decision = ctx.get("decision");
+  if (!site || !decision) {
+    return ctx.text("Site configuration or decision missing", 500);
   }
-  
-  await ctx.proxyService.forward(ctx, site, decision);
+
+  if (ctx.get("appConfig").cache.bypass_after_challenge && ctx.get("validatedClientId")) {
+    decision.cache = { enabled: false };
+  }
+
+  return ctx.get("proxyService").forward(ctx, site, decision);
 };

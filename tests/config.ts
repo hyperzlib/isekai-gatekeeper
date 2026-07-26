@@ -36,28 +36,28 @@ const config: AppConfig = {
       rules: [
         {
           id: "allow-open",
-          condition: ({ ctx }) => ctx.URL.pathname === "/open",
+          condition: ({ ctx }) => ctx.req.path === "/open",
           browser_challenge: { enabled: false },
           cache: { enabled: false },
           last: true,
         },
         {
           id: "cache-page",
-          condition: ({ ctx }) => ctx.URL.pathname === "/cache",
+          condition: ({ ctx }) => ctx.req.path === "/cache",
           browser_challenge: { enabled: false },
           cache: { enabled: true, ttl: 600, cache_key_mode: "path+query" },
           last: true,
         },
         {
           id: "cache-binary",
-          condition: ({ ctx }) => ctx.URL.pathname === "/binary",
+          condition: ({ ctx }) => ctx.req.path === "/binary",
           browser_challenge: { enabled: false },
           cache: { enabled: true, ttl: 600, cache_key_mode: "path+query" },
           last: true,
         },
         {
           id: "allow-upload",
-          condition: ({ ctx }) => ctx.URL.pathname === "/upload",
+          condition: ({ ctx }) => ctx.req.path === "/upload",
           browser_challenge: { enabled: false },
           cache: { enabled: false },
           last: true,

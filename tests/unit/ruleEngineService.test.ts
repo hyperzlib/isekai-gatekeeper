@@ -1,11 +1,10 @@
 import { describe, it, expect } from "bun:test";
-import Koa, { Context } from "koa";
+import { Context } from "hono";
 import { RuleEngineService } from "../../src/services/ruleEngineService.ts";
 import type { AppConfig, SiteConfig } from "../../src/types/config.ts";
 import type { RuleConfig, RuleInput, RuleTraceEvent } from "../../src/types/rule.ts";
-import { IncomingMessage } from "http";
-import { ServerResponse } from "http";
 import { makePageCacheKey, PAGE_CACHE_KEY_PREFIX } from "../../src/utils/cache.ts";
+import type { AppContext, AppEnv } from "../../src/types/hono.ts";
 
 function makeConfig(
   rules: RuleConfig[],
@@ -42,19 +41,18 @@ function makeConfig(
   };
 }
 
-function makeCtx(path: string, extraHeaders: Record<string, string> = {}): Context {
-  const app = new Koa();
-  const httpRequest = new IncomingMessage(null as any);
-  httpRequest.url = path;
-  httpRequest.headers = { host: "test.com", ...extraHeaders };
-  const httpResponse = new ServerResponse(httpRequest);
-  return app.createContext(httpRequest, httpResponse);
+function makeCtx(path: string, extraHeaders: Record<string, string> = {}): AppContext {
+  const host = extraHeaders.host ?? "test.com";
+  const url = new URL(path, `http://${host}`);
+  return new Context<AppEnv>(new Request(url.toString(), {
+    headers: { host, ...extraHeaders },
+  }), { env: {}, path: url.pathname }) as AppContext;
 }
 
 function trueCond(_input: RuleInput): boolean { return true; }
 function falseCond(_input: RuleInput): boolean { return false; }
 function pathCond(path: string): RuleConfig["condition"] {
-  return ({ ctx }: RuleInput) => ctx.request.path === path;
+  return ({ ctx }: RuleInput) => ctx.req.path === path;
 }
 function noop() {}
 
@@ -93,11 +91,7 @@ describe("RuleEngineService - evaluate defaults", () => {
   it("no site match → block=false, cache from global config", async () => {
     const svc = new RuleEngineService(makeConfig([]));
     await svc.init();
-    const req = new IncomingMessage(null as any);
-    req.url = "/page";
-    req.headers = { host: "unknown.com" };
-    const ctx = new Koa().createContext(req, new ServerResponse(req));
-    const dec = await svc.evaluate(ctx);
+    const dec = await svc.evaluate(makeCtx("/page", { host: "unknown.com" }));
     expect(dec.block).toBe(false);
     expect(dec.cache?.enabled).toBe(false);
     expect(dec.cache_key).toBe(`${PAGE_CACHE_KEY_PREFIX}unknown:/page`);
@@ -181,7 +175,7 @@ describe("RuleEngineService - evaluate exec", () => {
     await svc.init();
     const ctx = makeCtx("/exec");
     await svc.evaluate(ctx);
-    expect(ctx.state.ruleEngineState?.test).toBe(123);
+    expect(ctx.get("ruleEngineState")?.test).toBe(123);
   });
 });
 
@@ -192,7 +186,7 @@ describe("RuleEngineService - evaluate cache / browser_challenge policy", () => 
     const svc = new RuleEngineService(makeConfig([
       {
         id: "c1",
-        condition: ({ ctx }: RuleInput) => ctx.request.path.startsWith("/static/"),
+        condition: ({ ctx }: RuleInput) => ctx.req.path.startsWith("/static/"),
         cache: { enabled: true, ttl: 3600, cache_key_mode: "path" },
       },
     ]));
@@ -239,8 +233,8 @@ describe("RuleEngineService - evaluate cache / browser_challenge policy", () => 
 describe("RuleEngineService - evaluate runtime fault tolerance", () => {
   it("silently skips a rule whose condition throws at runtime", async () => {
     const throwingCond = ({ ctx }: RuleInput) => {
-      if (ctx.request.path === "/boom") throw new Error("boom");
-      return ctx.request.path === "/safe";
+      if (ctx.req.path === "/boom") throw new Error("boom");
+      return ctx.req.path === "/safe";
     };
     const svc = new RuleEngineService(makeConfig([
       { id: "r1", condition: throwingCond, cache: { enabled: true, ttl: 42 } },

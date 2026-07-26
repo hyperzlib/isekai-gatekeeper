@@ -3,7 +3,6 @@ import fs from "fs/promises";
 import Handlebars, { HelperDelegate, TemplateDelegate } from "handlebars";
 import type { FSWatcher } from "chokidar";
 import { env } from "../config/env";
-import { Context } from "koa";
 import { Dirent } from "fs";
 import { AppConfig } from "../types/config";
 
@@ -41,10 +40,11 @@ export class TemplateBuilder {
     return this.tplService.render(this.tplName, this.data);
   }
 
-  flush(ctx: Context): void {
-    const content = this.render();
-    ctx.type = "text/html; charset=utf-8";
-    ctx.body = content;
+  toResponse(status = 200): Response {
+    return new Response(this.render(), {
+      status,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
   }
 }
 

@@ -1,14 +1,14 @@
-import type { Context } from "koa";
 import type { CloudflareHttp } from "./cloudflare";
 import { CacheKeyModeType } from "./cache";
 import { RulePresets } from "../utils/RulePresets";
 import { RuleRateLimit } from "../utils/RuleRateLimit";
+import type { RuleContext } from "./hono";
 
 // ── Rule input types (injected at runtime) ──────────────────────────────────
 
 /** Rules condition/exec evaluation context */
 export interface RuleInput {
-  ctx: Context;
+  ctx: RuleContext;
   http: CloudflareHttp;
   presets: RulePresets;
   rateLimit: RuleRateLimit;

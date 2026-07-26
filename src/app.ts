@@ -1,87 +1,80 @@
-import Koa from "koa";
-import bodyParser from "@koa/bodyparser";
+import { Hono } from "hono";
 import type { AppConfig } from "./types/config.ts";
 import { RuleEngineService } from "./services/ruleEngineService.ts";
-import { errorMiddleware } from "./middlewares/errorMiddleware.ts";
+import { createErrorHandler } from "./middlewares/errorMiddleware.ts";
 import { firewallMiddleware } from "./middlewares/firewallMiddleware.ts";
 import { registerProxyRoutes, registerAdminRoutes } from "./routes/index.ts";
 import { ipMiddleware as geoipMiddleware } from "./middlewares/ipMiddleware.ts";
 import { ServiceContainer } from "./types/service.ts";
 import { siteLookupMiddleware } from "./middlewares/siteLookupMiddleware.ts";
 import { reverseProxyMiddleware } from "./middlewares/proxyMiddleware.ts";
+import type { AppEnv } from "./types/hono.ts";
 
 /**
- * 构建代理服务器 Koa 应用（处理入站请求 + 挑战路由）。
+ * 构建代理服务器 Hono 应用（处理入站请求 + 挑战路由）。
  */
 export async function createProxyApp(
   cfg: AppConfig,
   services: ServiceContainer,
-): Promise<Koa> {
-  const app = new Koa();
-
-  app.proxy = true; // 启用代理信任，正确获取客户端 IP 等信息
-
-  app.context.appConfig = cfg;
+): Promise<Hono<AppEnv>> {
+  const app = new Hono<AppEnv>();
 
   // 加载规则引擎
   const ruleEngine = new RuleEngineService(cfg, services.siteResolver);
   await ruleEngine.init();
   console.log("[boot] Rules compiled successfully.");
-  app.context.ruleEngine = ruleEngine;
 
-  app.context.cacheService = services.cacheService;
-  app.context.captchaService = services.captchaService;
-  app.context.rateLimitService = services.rateLimitService;
-  app.context.proxyService = services.proxyService;
-  app.context.siteResolver = services.siteResolver;
-  app.context.tpl = services.tpl;
-  app.context.geoipService = services.geoipService;
-
-  app.on("error", (err: Error) => {
-    console.error("[proxy] unhandled error:", err.message);
-    console.error(err);
+  app.onError(createErrorHandler("proxy"));
+  app.use("*", async (ctx, next) => {
+    ctx.set("appConfig", cfg);
+    ctx.set("cacheService", services.cacheService);
+    ctx.set("captchaService", services.captchaService);
+    ctx.set("cleanupService", services.cleanupService);
+    ctx.set("rateLimitService", services.rateLimitService);
+    ctx.set("proxyService", services.proxyService);
+    ctx.set("siteResolver", services.siteResolver);
+    ctx.set("tpl", services.tpl);
+    ctx.set("geoipService", services.geoipService);
+    ctx.set("ruleEngine", ruleEngine);
+    await next();
   });
 
-  app.use(errorMiddleware);
-
-  app.use(geoipMiddleware);
+  app.use("*", geoipMiddleware);
 
   // 挑战路由（在防火墙之前注册，避免被拦截）
   registerProxyRoutes(app);
 
   // 防火墙 + 反向代理
-  app.use(siteLookupMiddleware);
-  app.use(firewallMiddleware);
-  app.use(reverseProxyMiddleware);
+  app.use("*", siteLookupMiddleware);
+  app.use("*", firewallMiddleware);
+  app.use("*", reverseProxyMiddleware);
 
   return app;
 }
 
 /**
- * 构建 API 服务器 Koa 应用（缓存管理等）。
+ * 构建 API 服务器 Hono 应用（缓存管理等）。
  */
 export async function createApiApp(
   cfg: AppConfig,
   services: ServiceContainer,
-): Promise<Koa> {
-  const app = new Koa();
+): Promise<Hono<AppEnv>> {
+  const app = new Hono<AppEnv>();
 
-  app.context.appConfig = cfg;
-
-  app.context.cacheService = services.cacheService;
-  app.context.captchaService = services.captchaService;
-  app.context.rateLimitService = services.rateLimitService;
-  app.context.proxyService = services.proxyService;
-  app.context.siteResolver = services.siteResolver;
-  app.context.tpl = services.tpl;
-  app.context.geoipService = services.geoipService;
-
-  app.on("error", (err: Error) => {
-    console.error("[api] unhandled error:", err.message);
+  app.onError(createErrorHandler("api"));
+  app.use("*", async (ctx, next) => {
+    ctx.set("appConfig", cfg);
+    ctx.set("cacheService", services.cacheService);
+    ctx.set("captchaService", services.captchaService);
+    ctx.set("cleanupService", services.cleanupService);
+    ctx.set("rateLimitService", services.rateLimitService);
+    ctx.set("proxyService", services.proxyService);
+    ctx.set("siteResolver", services.siteResolver);
+    ctx.set("tpl", services.tpl);
+    ctx.set("geoipService", services.geoipService);
+    await next();
   });
 
-  app.use(errorMiddleware);
-  app.use(bodyParser());
   registerAdminRoutes(app);
 
   return app;

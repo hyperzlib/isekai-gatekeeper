@@ -1,5 +1,6 @@
-import type { Context } from "koa";
 import { CacheService } from "./cacheService";
+import type { AppContext } from "../types/hono.ts";
+import { getRequestIp } from "../utils/request.ts";
 
 export type RateLimitGroupBy =
   | "ip"
@@ -114,12 +115,12 @@ export class RateLimitService {
    * - ASN / country 缺失时会回退到 IP，避免把所有未知流量挤到同一个 key。
    * - path 使用 URL pathname，忽略 query（更稳态）。
    */
-  public buildGroupKey(ctx: Context, groupBy: RateLimitGroupBy): string {
-    const ip = (ctx.ip || "unknown").trim();
-    const path = ctx.URL.pathname || "/";
+  public buildGroupKey(ctx: AppContext, groupBy: RateLimitGroupBy): string {
+    const ip = (ctx.get("requestIp") ?? getRequestIp(ctx) ?? "unknown").trim();
+    const path = ctx.req.path || "/";
     const asn = this.getAsn(ctx);
     const country = this.getCountryCode(ctx);
-    const clientId = ctx.validatedClientId;
+    const clientId = ctx.get("validatedClientId");
 
     switch (groupBy) {
       case "ip":
@@ -151,14 +152,14 @@ export class RateLimitService {
     return `${RATE_LIMIT_KEY_PREFIX}${key}:`;
   }
 
-  private getAsn(ctx: Context): number | undefined {
-    const asn = ctx.geoip?.asn;
+  private getAsn(ctx: AppContext): number | undefined {
+    const asn = ctx.get("geoip")?.asn;
     if (typeof asn === "number" && Number.isFinite(asn)) return asn;
     return undefined;
   }
 
-  private getCountryCode(ctx: Context): string | undefined {
-    const geoip = ctx.geoip as
+  private getCountryCode(ctx: AppContext): string | undefined {
+    const geoip = ctx.get("geoip") as
       | { countryCode?: string; country_code?: string }
       | undefined;
     const code = geoip?.countryCode ?? geoip?.country_code;

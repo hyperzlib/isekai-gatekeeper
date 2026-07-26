@@ -4,7 +4,7 @@ import { makePageCacheKey } from "../utils/cache";
 import { validateChallengePassCookie } from "../services/tokenService";
 
 export const siteLookupMiddleware: Koa.Middleware = async (ctx, next) => {
-  const site = ctx.proxyService.selectSite(ctx);
+  const site = ctx.siteResolver.resolve(ctx);
   if (!site) {
     ctx.status = 404;
     ctx.body = "Site not found";
@@ -12,6 +12,7 @@ export const siteLookupMiddleware: Koa.Middleware = async (ctx, next) => {
   }
   ctx.currentSiteId = site.id;
   ctx.currentSite = site.config;
+  ctx.currentSiteMatchedHost = site.matchedHost;
 
   const validatedClientId = await validateChallengePassCookie(ctx);
   ctx.validatedClientId = validatedClientId;

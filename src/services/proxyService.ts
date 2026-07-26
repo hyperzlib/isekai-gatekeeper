@@ -9,7 +9,7 @@ import { RulePresets } from "../utils/RulePresets.ts";
 import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
 import { ruleExpressionTools } from "../utils/RuleTools.ts";
 import { toCloudflareHttp } from "../utils/http.ts";
-import { getRequestHostCandidates, normalizeConfiguredHostname } from "../utils/host.ts";
+import { SiteResolver } from "./siteResolver.ts";
 
 /**
  * 将 Node.js Readable stream 转为 Web ReadableStream，
@@ -94,7 +94,11 @@ export class ProxyService {
   private readonly cacheService: CacheService;
   private readonly appConfig: AppConfig;
 
-  constructor(appConfig: AppConfig, cacheService: CacheService) {
+  constructor(
+    appConfig: AppConfig,
+    cacheService: CacheService,
+    private readonly siteResolver = new SiteResolver(appConfig),
+  ) {
     this.appConfig = appConfig;
     this.cacheService = cacheService;
   }
@@ -103,19 +107,7 @@ export class ProxyService {
    * 按 Host 头匹配 site。
    */
   selectSite(ctx: Koa.Context): { id: string; config: SiteConfig } | null {
-    const hostCandidates = getRequestHostCandidates(ctx.headers["host"], ctx.protocol);
-    for (const candidate of hostCandidates) {
-      for (const [siteId, site] of Object.entries(this.appConfig.sites)) {
-        if (Array.isArray(site.hostname)) {
-          if (site.hostname.some((hostname) => normalizeConfiguredHostname(hostname) === candidate)) {
-            return { id: siteId, config: site };
-          }
-        } else if (normalizeConfiguredHostname(site.hostname) === candidate) {
-          return { id: siteId, config: site };
-        }
-      }
-    }
-    return null;
+    return this.siteResolver.resolve(ctx);
   }
 
   /**

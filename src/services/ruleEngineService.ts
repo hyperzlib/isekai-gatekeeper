@@ -13,7 +13,7 @@ import { CacheKeyModeType } from "../types/cache.ts";
 import { makePageCacheKey } from "../utils/cache.ts";
 import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
 import { ruleExpressionTools } from "../utils/RuleTools.ts";
-import { getRequestHostCandidates, normalizeConfiguredHostname } from "../utils/host.ts";
+import { SiteResolver } from "./siteResolver.ts";
 
 /** Runtime evaluation context passed to rule functions */
 type ExpressionGlobal = RuleInput & {
@@ -42,45 +42,32 @@ export interface RuleEvaluateOptions {
 
 export class RuleEngineService {
   private debug = false;
-  private readonly compiledSites: Map<string, CompiledSite> = new Map();
   private readonly appConfig: AppConfig;
 
-  constructor(appConfig: AppConfig) {
+  constructor(
+    appConfig: AppConfig,
+    private readonly siteResolver = new SiteResolver(appConfig),
+  ) {
     this.appConfig = appConfig;
     this.debug = appConfig.debug ?? false;
   }
 
-  async init() {
-    for (const [name, site] of Object.entries(this.appConfig.sites)) {
-      const rules = site.rules ?? [];
-      if (Array.isArray(site.hostname)) {
-        for (const hostname of site.hostname) {
-          this.compiledSites.set(normalizeConfiguredHostname(hostname), { rules, siteConfig: site });
-        }
-      } else if (typeof site.hostname === "string") {
-        this.compiledSites.set(normalizeConfiguredHostname(site.hostname), { rules, siteConfig: site });
-      }
-    }
-  }
+  async init() {}
 
   /** 根据 Host 查找对应 site 配置，无匹配返回 null。 */
   getSiteByHostname(hostname: string): SiteConfig | null {
-    const candidates = getRequestHostCandidates(hostname, "http");
-    for (const candidate of candidates) {
-      const entry = this.compiledSites.get(candidate);
-      if (entry) return entry.siteConfig;
-    }
-    return null;
+    return this.siteResolver.resolveHost(hostname, "http")?.config ?? null;
   }
 
   /** 对请求上下文执行 multi-match 规则评估，返回合并决策。 */
   async evaluate(ctx: Context, options: RuleEvaluateOptions = {}): Promise<Decision> {
     const trace = options.trace;
-    const hostCandidates = getRequestHostCandidates(ctx.request.headers["host"], ctx.protocol);
-    const hostname = hostCandidates[0] ?? "";
-    const entry = hostCandidates
-      .map((candidate) => this.compiledSites.get(candidate))
-      .find((candidate) => candidate !== undefined);
+    const resolvedSite = ctx.currentSite && ctx.currentSiteId
+      ? { id: ctx.currentSiteId, config: ctx.currentSite, matchedHost: ctx.currentSiteMatchedHost ?? String(ctx.request.headers["host"] ?? "") }
+      : this.siteResolver.resolve(ctx);
+    const entry: CompiledSite | undefined = resolvedSite
+      ? { rules: resolvedSite.config.rules ?? [], siteConfig: resolvedSite.config }
+      : undefined;
 
     // 默认决策
     const defaultCachePolicy: CachePolicy = {
@@ -94,7 +81,7 @@ export class RuleEngineService {
 
     trace?.({
       type: "site",
-      hostname,
+      hostname: resolvedSite?.matchedHost ?? String(ctx.request.headers["host"] ?? ""),
       matched: !!entry,
       siteHostname: entry?.siteConfig.hostname,
     });
@@ -104,7 +91,7 @@ export class RuleEngineService {
         block: false,
         cache: defaultCachePolicy,
         browser_challenge: defaultChallenge,
-        cache_key: makePageCacheKey(ctx.currentSiteId || "unknown", ctx.URL.pathname, ctx.URL.search, defaultCachePolicy.cache_key_mode),
+        cache_key: makePageCacheKey(ctx.currentSiteId || resolvedSite?.id || "unknown", ctx.URL.pathname, ctx.URL.search, defaultCachePolicy.cache_key_mode),
       };
       trace?.({ type: "default_decision", decision });
       trace?.({ type: "final_decision", decision });
@@ -257,7 +244,7 @@ export class RuleEngineService {
     }
 
     const cacheKey = makePageCacheKey(
-      ctx.currentSiteId || "unknown",
+      ctx.currentSiteId || resolvedSite?.id || "unknown",
       ctx.URL.pathname,
       ctx.URL.search,
       cachePolicy.cache_key_mode ?? defaultCachePolicy.cache_key_mode,

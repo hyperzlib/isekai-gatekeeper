@@ -24,7 +24,7 @@ export async function createProxyApp(
   app.context.appConfig = cfg;
 
   // 加载规则引擎
-  const ruleEngine = new RuleEngineService(cfg);
+  const ruleEngine = new RuleEngineService(cfg, services.siteResolver);
   await ruleEngine.init();
   console.log("[boot] Rules compiled successfully.");
   app.context.ruleEngine = ruleEngine;
@@ -33,6 +33,7 @@ export async function createProxyApp(
   app.context.captchaService = services.captchaService;
   app.context.rateLimitService = services.rateLimitService;
   app.context.proxyService = services.proxyService;
+  app.context.siteResolver = services.siteResolver;
   app.context.tpl = services.tpl;
   app.context.geoipService = services.geoipService;
 
@@ -71,6 +72,7 @@ export async function createApiApp(
   app.context.captchaService = services.captchaService;
   app.context.rateLimitService = services.rateLimitService;
   app.context.proxyService = services.proxyService;
+  app.context.siteResolver = services.siteResolver;
   app.context.tpl = services.tpl;
   app.context.geoipService = services.geoipService;
 

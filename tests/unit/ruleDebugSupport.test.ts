@@ -7,6 +7,7 @@ import { CacheService } from "../../src/services/cacheService.ts";
 import { ProxyService } from "../../src/services/proxyService.ts";
 import { RateLimitService } from "../../src/services/rateLimitService.ts";
 import { RuleEngineService } from "../../src/services/ruleEngineService.ts";
+import { SiteResolver } from "../../src/services/siteResolver.ts";
 import type { DebugRuntime } from "../../cli/ruleDebugSupport.ts";
 import {
   createDebugContext,
@@ -63,14 +64,16 @@ async function makeRuntime(): Promise<DebugRuntime> {
   const cacheService = new CacheService(config);
   await cacheService.init();
   const rateLimitService = new RateLimitService(cacheService);
-  const proxyService = new ProxyService(config, cacheService);
-  const ruleEngine = new RuleEngineService(config);
+  const siteResolver = new SiteResolver(config);
+  const proxyService = new ProxyService(config, cacheService, siteResolver);
+  const ruleEngine = new RuleEngineService(config, siteResolver);
   await ruleEngine.init();
   return {
     config,
     cacheMode: "memory",
     cacheService,
     rateLimitService,
+    siteResolver,
     proxyService,
     ruleEngine,
   };

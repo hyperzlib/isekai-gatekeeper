@@ -4,6 +4,7 @@ import { CleanupService } from "../services/cleanupService";
 import { GeoIPService } from "../services/geoipService";
 import { ProxyService } from "../services/proxyService";
 import { RateLimitService } from "../services/rateLimitService";
+import { SiteResolver } from "../services/siteResolver";
 import { TemplateService } from "../services/templateService";
 
 export type ServiceContainer = {
@@ -12,6 +13,7 @@ export type ServiceContainer = {
   cleanupService: CleanupService;
   rateLimitService: RateLimitService;
   proxyService: ProxyService;
+  siteResolver: SiteResolver;
   tpl: TemplateService;
   geoipService: GeoIPService;
 }

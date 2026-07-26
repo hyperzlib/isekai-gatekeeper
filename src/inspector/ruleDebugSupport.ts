@@ -10,6 +10,7 @@ import { CacheService } from "../services/cacheService.ts";
 import { ProxyService } from "../services/proxyService.ts";
 import { RateLimitService } from "../services/rateLimitService.ts";
 import { RuleEngineService } from "../services/ruleEngineService.ts";
+import { SiteResolver } from "../services/siteResolver.ts";
 
 export type DebugCacheMode = "memory" | "config";
 
@@ -36,6 +37,7 @@ export interface DebugRuntime {
   cacheMode: DebugCacheMode;
   cacheService: CacheService;
   rateLimitService: RateLimitService;
+  siteResolver: SiteResolver;
   proxyService: ProxyService;
   ruleEngine: RuleEngineService;
 }
@@ -109,8 +111,9 @@ export async function createDebugRuntime(
   await cacheService.init();
 
   const rateLimitService = new RateLimitService(cacheService);
-  const proxyService = new ProxyService(config, cacheService);
-  const ruleEngine = new RuleEngineService(config);
+  const siteResolver = new SiteResolver(config);
+  const proxyService = new ProxyService(config, cacheService, siteResolver);
+  const ruleEngine = new RuleEngineService(config, siteResolver);
   await ruleEngine.init();
 
   return {
@@ -118,6 +121,7 @@ export async function createDebugRuntime(
     cacheMode,
     cacheService,
     rateLimitService,
+    siteResolver,
     proxyService,
     ruleEngine,
   };
@@ -167,15 +171,17 @@ export function createDebugContext(runtime: DebugRuntime, request: DebugRequestC
   ctx.appConfig = runtime.config;
   ctx.cacheService = runtime.cacheService;
   ctx.rateLimitService = runtime.rateLimitService;
+  ctx.siteResolver = runtime.siteResolver;
   ctx.proxyService = runtime.proxyService;
   ctx.ruleEngine = runtime.ruleEngine;
   ctx.geoip = normalized.geoip as Context["geoip"];
   ctx.validatedClientId = normalized.validatedClientId ?? null;
 
-  const site = runtime.proxyService.selectSite(ctx);
+  const site = runtime.siteResolver.resolve(ctx);
   if (site) {
     ctx.currentSiteId = site.id;
     ctx.currentSite = site.config;
+    ctx.currentSiteMatchedHost = site.matchedHost;
   }
 
   const rawBody = ".".repeat(Math.max(0, Math.floor(normalized.bodyLength ?? 0)));

@@ -8,6 +8,7 @@ import { GeoIPService } from "./services/geoipService.ts";
 import { CaptchaService } from "./services/captchaService.ts";
 import { ServiceContainer } from "./types/service.ts";
 import { RateLimitService } from "./services/rateLimitService.ts";
+import { SiteResolver } from "./services/siteResolver.ts";
 
 async function main() {
   const cfg = await loadConfig();
@@ -17,7 +18,8 @@ async function main() {
   const cacheService = new CacheService(cfg);
   await cacheService.init();
 
-  const proxyService = new ProxyService(cfg, cacheService);
+  const siteResolver = new SiteResolver(cfg);
+  const proxyService = new ProxyService(cfg, cacheService, siteResolver);
   const captchaService = new CaptchaService(cfg);
 
   const rateLimitService = new RateLimitService(cacheService);
@@ -43,6 +45,7 @@ async function main() {
     cleanupService,
     rateLimitService,
     proxyService,
+    siteResolver,
     tpl: templateService,
     geoipService,
   };

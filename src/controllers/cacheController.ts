@@ -2,20 +2,8 @@ import type Koa from "koa";
 import { timingSafeEqual } from "../lib/crypto.ts";
 import { makePageCacheKey } from "../utils/cache.ts";
 
-function resolveSiteIdByHostname(ctx: Koa.Context, hostname: string): string | null {
-  const normalized = hostname.toLowerCase();
-  for (const [siteId, siteConfig] of Object.entries(ctx.appConfig.sites)) {
-    if (Array.isArray(siteConfig.hostname)) {
-      if (siteConfig.hostname.includes(normalized)) {
-        return siteId;
-      }
-    } else if (typeof siteConfig.hostname === "string") {
-      if (siteConfig.hostname === normalized) {
-        return siteId;
-      }
-    }
-  }
-  return null;
+function resolveSiteIdByHost(ctx: Koa.Context, host: string, protocol: string): string | null {
+  return ctx.siteResolver.resolveHost(host, protocol.replace(/:$/, ""))?.id ?? null;
 }
 
 /**
@@ -72,7 +60,7 @@ export const deleteCache = async (ctx: Koa.Context) => {
       return;
     }
 
-    const site = resolveSiteIdByHostname(ctx, parsed.hostname);
+    const site = resolveSiteIdByHost(ctx, parsed.host, parsed.protocol);
     if (!site) {
       ctx.status = 400;
       ctx.body = { error: "No site matched by URL hostname" };
@@ -95,7 +83,7 @@ export const deleteCache = async (ctx: Koa.Context) => {
       return;
     }
 
-    const site = resolveSiteIdByHostname(ctx, parsed.hostname);
+    const site = resolveSiteIdByHost(ctx, parsed.host, parsed.protocol);
     if (!site) {
       ctx.status = 400;
       ctx.body = { error: "No site matched by URL prefix hostname" };
@@ -150,7 +138,7 @@ export const listCachedPages = async (ctx: Koa.Context) => {
       return;
     }
 
-    const site = resolveSiteIdByHostname(ctx, parsed.hostname);
+    const site = resolveSiteIdByHost(ctx, parsed.host, parsed.protocol);
     if (!site) {
       ctx.status = 400;
       ctx.body = { error: "No site matched by URL prefix hostname" };

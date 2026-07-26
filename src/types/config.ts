@@ -34,11 +34,17 @@ export interface BunRedisConfig {
   url: string;
 }
 
+/** Node.js redis 配置 */
+export interface RedisConfig {
+  url: string;
+}
+
 /** 全局缓存配置 */
 export interface CacheConfig {
   enabled: boolean;
-  provider: "memory" | "bun+redis";
+  provider: "memory" | "bun+redis" | "redis";
   bun_redis?: BunRedisConfig;
+  redis?: RedisConfig;
 
   default_ttl: number;
   cache_key_mode: CacheKeyModeType;

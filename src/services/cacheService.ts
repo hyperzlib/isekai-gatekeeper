@@ -43,6 +43,19 @@ export class CacheService {
         );
         await this.store.init();
         break;
+      case "redis":
+        if (!this.cacheConfig.redis?.url) {
+          throw new Error("Redis cache provider requires cache.redis.url configuration");
+        }
+
+        const { RedisCacheStore } = await import("../lib/redisCacheStore.ts");
+        this.store = new RedisCacheStore(
+          this.cacheConfig.redis.url,
+          this.cacheConfig.max_body_bytes,
+          this.cacheConfig.default_ttl
+        );
+        await this.store.init();
+        break;
       default:
         throw new Error(`Unsupported cache provider: ${this.cacheConfig.provider}`);
     }

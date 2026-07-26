@@ -23,7 +23,7 @@ const config: AppConfig = {
 
   cache: {
     enabled: true,
-    provider: "memory",          // 可选 "memory" | "bun+redis"
+    provider: "memory",          // 可选 "memory" | "bun+redis" | "redis"
     default_ttl: 60,            // 秒
     cache_key_mode: "path+query", // "path+query" | "path"
     max_entries: 1000,
@@ -34,6 +34,7 @@ const config: AppConfig = {
     ],
     bypass_after_challenge: true,
     // bun_redis: { url: "redis://localhost:6379" },
+    // redis: { url: "redis://localhost:6379" },
   },
 
   // ── GeoIP (可选) ──────────────────────────────────────────────────────

@@ -33,6 +33,14 @@
     "react": "^19.2.8",
     "zod": "^3.24.2"
   },
+  "peerDependencies": {
+    "redis": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "redis": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/koa": "^2.15.0",
     "@types/koa-mount": "^4.0.5",

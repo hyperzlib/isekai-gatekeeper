@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { MemoryCacheStore } from "../../src/lib/memoryCacheStore.ts";
 import { BunRedisCacheStore } from "../../src/lib/bunRedisCacheStore.ts";
+import { RedisCacheStore } from "../../src/lib/redisCacheStore.ts";
 import { CachedResponse, ICacheStore } from "../../src/types/cache.ts";
 
 function makeResp(body: string, ttl = 60): CachedResponse {
@@ -351,6 +352,110 @@ describe("CacheStore - Tag index", () => {
 describeRedis("BunRedisCacheStore - optional Redis integration", () => {
   async function makeRedisStore(): Promise<{ store: ICacheStore; prefix: string }> {
     const store = new BunRedisCacheStore(redisTestUrl!, 1_000_000, 60);
+    await store.init();
+    return { store, prefix: redisKeyPrefix() };
+  }
+
+  it("stores generic values without using response cache keys", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const key = `${prefix}generic`;
+
+    await store.set(key, { ok: true }, 60);
+
+    expect(await store.get<{ ok: boolean }>(key)).toEqual({ ok: true });
+    expect(await store.getCachedResponseMeta(key)).toBeNull();
+
+    await store.delete(key);
+    expect(await store.get<{ ok: boolean }>(key)).toBeNull();
+  });
+
+  it("stores cached response meta and body under the logical key", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const key = `${prefix}page`;
+
+    await store.setCachedResponse(key, makeResp("hello"), 60, [`${prefix}tag`]);
+
+    const meta = await store.getCachedResponseMeta(key);
+    expect(meta).toEqual({
+      status: 200,
+      headers: { "content-type": "text/html" },
+      cachedAt: expect.any(Number),
+      ttl: 60,
+      tags: [`${prefix}tag`],
+    });
+    expect("body" in meta!).toBe(false);
+
+    const cached = await store.getCachedResponse(key);
+    expect(cached?.body).toBe("hello");
+    expect(await store.listByPrefix(prefix)).toEqual([key]);
+
+    await store.deleteCachedResponse(key);
+    expect(await store.getCachedResponse(key)).toBeNull();
+    expect(await store.listByTag(`${prefix}tag`)).toEqual([]);
+  });
+
+  it("cleans stale tag indices from previous cached response tags", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const key = `${prefix}page`;
+
+    await store.setCachedResponse(key, makeResp("old"), 60, [`${prefix}old`]);
+    await store.setCachedResponse(key, makeResp("new"), 60, [`${prefix}new`]);
+
+    expect(await store.listByTag(`${prefix}old`)).toEqual([]);
+    expect(await store.listByTag(`${prefix}new`)).toEqual([key]);
+
+    await store.deleteByTag(`${prefix}new`);
+    expect(await store.getCachedResponse(key)).toBeNull();
+  });
+
+  it("deletes cached responses by logical prefix without exposing meta/body keys", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const a = `${prefix}wiki/A`;
+    const b = `${prefix}wiki/B`;
+    const other = `${prefix}other`;
+
+    await store.setCachedResponse(a, makeResp("a"), 60, [`${prefix}wiki`]);
+    await store.setCachedResponse(b, makeResp("b"), 60, [`${prefix}wiki`]);
+    await store.setCachedResponse(other, makeResp("other"), 60, [`${prefix}other`]);
+
+    expect((await store.listByPrefix(`${prefix}wiki/`)).sort()).toEqual([a, b].sort());
+    const deleted = await store.deleteByPrefix(`${prefix}wiki/`);
+
+    expect(deleted).toBe(2);
+    expect(await store.getCachedResponse(a)).toBeNull();
+    expect(await store.getCachedResponse(b)).toBeNull();
+    expect(await store.getCachedResponse(other)).not.toBeNull();
+    expect(await store.listByTag(`${prefix}wiki`)).toEqual([]);
+
+    await store.deleteByPrefix(prefix);
+  });
+
+  it("consumes rate limits atomically through Redis", async () => {
+    const { store, prefix } = await makeRedisStore();
+    const key = `${prefix}rate`;
+    const now = Date.now();
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => store.consumeRateLimit({
+        key,
+        windowSec: 60,
+        maxRequests: 5,
+        cost: 1,
+        now,
+      })),
+    );
+
+    expect(results.map((r) => r.current).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(results.filter((r) => r.limited).length).toBe(5);
+    expect(results.filter((r) => r.firstLimitedInWindow).length).toBe(1);
+
+    await store.delete(key);
+  });
+});
+
+describeRedis("RedisCacheStore - optional Redis integration", () => {
+  async function makeRedisStore(): Promise<{ store: ICacheStore; prefix: string }> {
+    const store = new RedisCacheStore(redisTestUrl!, 1_000_000, 60);
     await store.init();
     return { store, prefix: redisKeyPrefix() };
   }

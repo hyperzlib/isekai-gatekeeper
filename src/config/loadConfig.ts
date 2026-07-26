@@ -62,6 +62,7 @@ export async function loadConfig(configPath = env.CONFIG_PATH): Promise<AppConfi
   const cacheCfg = raw.cache as Record<string, unknown>;
   const bcPow = (bc.pow ?? {}) as Record<string, unknown>;
   const bunRedis = (cacheCfg.bun_redis ?? {}) as Record<string, unknown>;
+  const redis = (cacheCfg.redis ?? {}) as Record<string, unknown>;
 
   const debug = typeof raw.debug === "boolean" ? raw.debug : undefined;
   const templates_dir = typeof raw.templates_dir === "string" ? raw.templates_dir : "./views";
@@ -109,8 +110,9 @@ export async function loadConfig(configPath = env.CONFIG_PATH): Promise<AppConfi
     },
     cache: {
       enabled: cacheCfg.enabled as boolean,
-      provider: (cacheCfg.provider ?? "memory") as "memory" | "bun+redis",
+      provider: (cacheCfg.provider ?? "memory") as "memory" | "bun+redis" | "redis",
       bun_redis: bunRedis.url ? { url: bunRedis.url as string } : undefined,
+      redis: redis.url ? { url: redis.url as string } : undefined,
       default_ttl: cacheCfg.default_ttl as number,
       cache_key_mode: (cacheCfg.cache_key_mode ?? "path+query") as "path" | "path+query",
       cache_tags_callback: cacheCfg.cache_tags_callback as CacheTagsCallback | undefined,

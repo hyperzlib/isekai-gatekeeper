@@ -9,6 +9,7 @@ import { RulePresets } from "../utils/RulePresets.ts";
 import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
 import { ruleExpressionTools } from "../utils/RuleTools.ts";
 import { toCloudflareHttp } from "../utils/http.ts";
+import { getRequestHostCandidates, normalizeConfiguredHostname } from "../utils/host.ts";
 
 /**
  * 将 Node.js Readable stream 转为 Web ReadableStream，
@@ -77,6 +78,18 @@ function decodeContentEncoding(body: Buffer, encoding: string): Buffer {
   }
 }
 
+function isTextContentType(contentType: string): boolean {
+  const mime = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return (
+    mime.startsWith("text/") ||
+    mime === "application/json" ||
+    mime === "application/javascript" ||
+    mime === "application/xml" ||
+    mime === "application/xhtml+xml" ||
+    mime === "image/svg+xml"
+  );
+}
+
 export class ProxyService {
   private readonly cacheService: CacheService;
   private readonly appConfig: AppConfig;
@@ -90,14 +103,16 @@ export class ProxyService {
    * 按 Host 头匹配 site。
    */
   selectSite(ctx: Koa.Context): { id: string; config: SiteConfig } | null {
-    const host = (ctx.headers["host"] ?? "").split(":")[0] ?? "";
-    for (const [siteId, site] of Object.entries(this.appConfig.sites)) {
-      if (Array.isArray(site.hostname)) {
-        if (site.hostname.includes(host)) {
+    const hostCandidates = getRequestHostCandidates(ctx.headers["host"], ctx.protocol);
+    for (const candidate of hostCandidates) {
+      for (const [siteId, site] of Object.entries(this.appConfig.sites)) {
+        if (Array.isArray(site.hostname)) {
+          if (site.hostname.some((hostname) => normalizeConfiguredHostname(hostname) === candidate)) {
+            return { id: siteId, config: site };
+          }
+        } else if (normalizeConfiguredHostname(site.hostname) === candidate) {
           return { id: siteId, config: site };
         }
-      } else if (site.hostname === host) {
-        return { id: siteId, config: site };
       }
     }
     return null;
@@ -237,9 +252,13 @@ export class ProxyService {
       }
 
       ctx.set("X-Cache", "MISS");
-      
+
       const allowedStatuses = [200, 301, 308];
-      if (allowedStatuses.includes(resp.status) && this.appConfig.cache.allowed_mimetypes.includes(contentType)) {
+      const cacheableTextResponse =
+        allowedStatuses.includes(resp.status) &&
+        this.appConfig.cache.allowed_mimetypes.includes(contentType) &&
+        isTextContentType(contentType);
+      if (cacheableTextResponse) {
         ctx.set("X-Cache-Reason", "MISS_CACHEABLE");
         try {
           const chunks: Buffer[] = [];
@@ -252,7 +271,7 @@ export class ProxyService {
           const rawBody: Buffer = Buffer.concat(chunks);
 
           // 解压缩
-          const contentEncoding = (responseHeaders["content-encoding"]?.[0] ?? "").toLowerCase().trim();
+          const contentEncoding = (resp.headers.get("content-encoding") ?? "").toLowerCase().trim();
           let bodyBuffer = rawBody;
           const cachedHeaders = { ...responseHeaders };
           if (contentEncoding) {
@@ -286,7 +305,7 @@ export class ProxyService {
           console.error("[ProxyService] Failed to cache response:", err);
         }
       } else {
-        ctx.set("X-Cache-Reason", "UNCACHEABLE");
+        ctx.set("X-Cache-Reason", isTextContentType(contentType) ? "UNCACHEABLE" : "UNCACHEABLE_NON_TEXT");
       }
     }
 

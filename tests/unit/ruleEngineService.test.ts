@@ -74,6 +74,17 @@ describe("RuleEngineService - getSiteByHostname", () => {
     await svc.init();
     expect(svc.getSiteByHostname("other.com")).toBeNull();
   });
+
+  it("prefers bare hostnames but falls back to explicit standard ports", async () => {
+    const cfg = makeConfig([]);
+    cfg.sites["test.com"]!.hostname = ["test.com:80", "fallback.test"];
+
+    const svc = new RuleEngineService(cfg);
+    await svc.init();
+
+    expect(svc.getSiteByHostname("test.com")?.hostname).toEqual(["test.com:80", "fallback.test"]);
+    expect(svc.getSiteByHostname("test.com:80")?.hostname).toEqual(["test.com:80", "fallback.test"]);
+  });
 });
 
 // ─── evaluate：默认行为 ───────────────────────────────────────────────────────
@@ -99,6 +110,14 @@ describe("RuleEngineService - evaluate defaults", () => {
     expect(dec.block).toBe(false);
     expect(dec.cache?.enabled).toBe(true);
     expect(dec.browser_challenge?.enabled).toBe(true);
+  });
+
+  it("does not fall back to the bare hostname for non-standard ports", async () => {
+    const svc = new RuleEngineService(makeConfig([], { cacheEnabled: true }));
+    await svc.init();
+    const dec = await svc.evaluate(makeCtx("/anything", { host: "test.com:8080" }));
+    expect(dec.block).toBe(false);
+    expect(dec.cache_key).toBe(`${PAGE_CACHE_KEY_PREFIX}unknown:/anything`);
   });
 });
 

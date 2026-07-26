@@ -130,6 +130,7 @@ describe("proxy + upstream integration", () => {
     "covers normal access, challenge interception, cache lifecycle, and file upload",
     async () => {
       let cacheCounter = 0;
+      let binaryCounter = 0;
       let blockedCounter = 0;
 
       const upstream = Bun.serve({
@@ -149,6 +150,14 @@ describe("proxy + upstream integration", () => {
             return new Response(`cache-count:${cacheCounter}`, {
               status: 200,
               headers: { "content-type": "text/plain" },
+            });
+          }
+
+          if (url.pathname === "/binary") {
+            binaryCounter += 1;
+            return new Response(new Uint8Array([binaryCounter, 2, 3]), {
+              status: 200,
+              headers: { "content-type": "application/octet-stream" },
             });
           }
 
@@ -237,6 +246,18 @@ describe("proxy + upstream integration", () => {
         const cacheAfterClearBody = await cacheAfterClearResp.text();
         expect(cacheAfterClearResp.status).toBe(200);
         expect(cacheAfterClearBody).toBe("cache-count:2");
+
+        // 非文本内容：即使规则启用缓存，也应跳过缓存并保持流式返回
+        const binaryFirstResp = await fetchViaProxy("/binary");
+        expect(binaryFirstResp.status).toBe(200);
+        expect(binaryFirstResp.headers.get("x-cache-reason")).toBe("UNCACHEABLE_NON_TEXT");
+        expect(Array.from(new Uint8Array(await binaryFirstResp.arrayBuffer()))).toEqual([1, 2, 3]);
+
+        const binarySecondResp = await fetchViaProxy("/binary");
+        expect(binarySecondResp.status).toBe(200);
+        expect(binarySecondResp.headers.get("x-cache")).not.toBe("HIT");
+        expect(Array.from(new Uint8Array(await binarySecondResp.arrayBuffer()))).toEqual([2, 2, 3]);
+        expect(binaryCounter).toBe(2);
 
         // 文件上传
         const form = new FormData();

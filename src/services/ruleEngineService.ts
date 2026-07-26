@@ -13,6 +13,7 @@ import { CacheKeyModeType } from "../types/cache.ts";
 import { makePageCacheKey } from "../utils/cache.ts";
 import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
 import { ruleExpressionTools } from "../utils/RuleTools.ts";
+import { getRequestHostCandidates, normalizeConfiguredHostname } from "../utils/host.ts";
 
 /** Runtime evaluation context passed to rule functions */
 type ExpressionGlobal = RuleInput & {
@@ -54,25 +55,32 @@ export class RuleEngineService {
       const rules = site.rules ?? [];
       if (Array.isArray(site.hostname)) {
         for (const hostname of site.hostname) {
-          this.compiledSites.set(hostname, { rules, siteConfig: site });
+          this.compiledSites.set(normalizeConfiguredHostname(hostname), { rules, siteConfig: site });
         }
       } else if (typeof site.hostname === "string") {
-        this.compiledSites.set(site.hostname, { rules, siteConfig: site });
+        this.compiledSites.set(normalizeConfiguredHostname(site.hostname), { rules, siteConfig: site });
       }
     }
   }
 
   /** 根据 Host 查找对应 site 配置，无匹配返回 null。 */
   getSiteByHostname(hostname: string): SiteConfig | null {
-    const entry = this.compiledSites.get(hostname);
-    return entry?.siteConfig ?? null;
+    const candidates = getRequestHostCandidates(hostname, "http");
+    for (const candidate of candidates) {
+      const entry = this.compiledSites.get(candidate);
+      if (entry) return entry.siteConfig;
+    }
+    return null;
   }
 
   /** 对请求上下文执行 multi-match 规则评估，返回合并决策。 */
   async evaluate(ctx: Context, options: RuleEvaluateOptions = {}): Promise<Decision> {
     const trace = options.trace;
-    const hostname = ctx.request.headers["host"] ?? "";
-    const entry = this.compiledSites.get(hostname);
+    const hostCandidates = getRequestHostCandidates(ctx.request.headers["host"], ctx.protocol);
+    const hostname = hostCandidates[0] ?? "";
+    const entry = hostCandidates
+      .map((candidate) => this.compiledSites.get(candidate))
+      .find((candidate) => candidate !== undefined);
 
     // 默认决策
     const defaultCachePolicy: CachePolicy = {

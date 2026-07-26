@@ -49,6 +49,13 @@ const config: AppConfig = {
           last: true,
         },
         {
+          id: "cache-binary",
+          condition: ({ ctx }) => ctx.URL.pathname === "/binary",
+          browser_challenge: { enabled: false },
+          cache: { enabled: true, ttl: 600, cache_key_mode: "path+query" },
+          last: true,
+        },
+        {
           id: "allow-upload",
           condition: ({ ctx }) => ctx.URL.pathname === "/upload",
           browser_challenge: { enabled: false },

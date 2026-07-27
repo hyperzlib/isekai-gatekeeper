@@ -1,7 +1,7 @@
 import { RulePresets } from "./utils/RulePresets";
 import { CloudflareHttp } from "./types/cloudflare";
 import { RuleRateLimit } from "./utils/RuleRateLimit";
-import { RuleExpressionTools } from "./utils/RuleTools";
+import { RuleExpressionUtils } from "./utils/RuleUtils";
 import type { RuleContext } from "./types/hono";
 
 // 这个文件用于调试配置文件中的规则表达式
@@ -10,10 +10,8 @@ const evaluateRuleExpression = (
     http: CloudflareHttp,
     presets: RulePresets,
     rateLimit: RuleRateLimit,
+    utils: RuleExpressionUtils,
     state: Record<string, any>,
-    match: RuleExpressionTools["match"],
-    matchExtractGroup: RuleExpressionTools["matchExtractGroup"],
-    matchGlob: RuleExpressionTools["matchGlob"],
     cacheTags: string[]
 ): any => {
     return false;

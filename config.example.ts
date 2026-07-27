@@ -71,7 +71,7 @@ const config: AppConfig = {
           "X-Proxy-Server": "isekai-gatekeeper",
           // 兼容 Cloudflare Headers — 使用函数动态计算
           "CF-IPCountry": ({ ctx }) => ctx.get("geoip")?.countryCode ?? "XX",
-          "CF-Visitor": ({ ctx }) => JSON.stringify({ scheme: new URL(ctx.req.url).protocol.replace(/:$/, "") }),
+          "CF-Visitor": ({ presets }) => presets.isHttps ? 'https': 'http',
         },
       },
       rules: [
@@ -95,8 +95,8 @@ const config: AppConfig = {
         // 规则：放行 wiki 页面 (返回缓存)
         {
           id: "cache-wiki",
-          condition: ({ http, matchGlob }) =>
-            matchGlob(http.request.uri.path, "/wiki/*"),
+          condition: ({ http, utils }) =>
+            utils.matchGlob(http.request.uri.path, "/wiki/*"),
           last: true,
           cache: {
             enabled: true,

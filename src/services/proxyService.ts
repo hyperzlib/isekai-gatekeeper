@@ -6,7 +6,7 @@ import type { CachedResponse } from "../types/cache.ts";
 import type { RuleInput, HeaderBuilder } from "../types/rule.ts";
 import { RulePresets } from "../utils/RulePresets.ts";
 import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
-import { ruleExpressionTools } from "../utils/RuleTools.ts";
+import { ruleExpressionUtils } from "../utils/RuleUtils.ts";
 import { toCloudflareHttp } from "../utils/http.ts";
 import { SiteResolver } from "./siteResolver.ts";
 import type { AppContext, RuleContext } from "../types/hono.ts";
@@ -162,7 +162,7 @@ export class ProxyService {
         presets: new RulePresets(ctx),
         rateLimit: new RuleRateLimit(ctx),
         state,
-        ...ruleExpressionTools,
+        utils: ruleExpressionUtils,
       };
       const renderedHeaders = renderHeaders(site.backend.headers, exprGlobal as RuleInput);
       for (const [key, value] of Object.entries(renderedHeaders)) {

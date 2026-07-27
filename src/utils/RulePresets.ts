@@ -30,4 +30,8 @@ export class RulePresets {
     const ua = this.ctx.req.header("user-agent") ?? "";
     return /ChatGPT-User|Claude-User|Bard-User|Gemini-User/i.test(ua);
   }
+
+  public get isHttps(): boolean {
+    return this.ctx.req.url.startsWith('https://') || this.ctx.req.header('X-Forwarded-Proto') === 'https';
+  }
 }

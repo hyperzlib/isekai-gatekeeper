@@ -11,7 +11,7 @@ import type { CloudflareHttp } from "../types/cloudflare.ts";
 import { CacheKeyModeType } from "../types/cache.ts";
 import { makePageCacheKey } from "../utils/cache.ts";
 import { RuleRateLimit } from "../utils/RuleRateLimit.ts";
-import { ruleExpressionTools } from "../utils/RuleTools.ts";
+import { RuleExpressionUtils, ruleExpressionUtils } from "../utils/RuleUtils.ts";
 import { SiteResolver } from "./siteResolver.ts";
 import type { AppContext, RuleContext } from "../types/hono.ts";
 import { getRequestHost } from "../utils/request.ts";
@@ -22,10 +22,8 @@ type ExpressionGlobal = RuleInput & {
   http: CloudflareHttp;
   presets: RulePresets;
   rateLimit: RuleRateLimit;
+  utils: RuleExpressionUtils;
   state: Record<string, any>;
-  matchGlob: typeof ruleExpressionTools.matchGlob;
-  match: typeof ruleExpressionTools.match;
-  matchExtractGroup: typeof ruleExpressionTools.matchExtractGroup;
 };
 
 type CacheTagExpressionGlobal = ExpressionGlobal & CacheTagRuleInput & {
@@ -118,8 +116,8 @@ export class RuleEngineService {
       http: toCloudflareHttp(ctx),
       presets: new RulePresets(ctx),
       rateLimit: new RuleRateLimit(ctx),
+      utils: ruleExpressionUtils,
       state,
-      ...ruleExpressionTools,
     } as ExpressionGlobal;
 
     if (entry.rules.length > 0) {

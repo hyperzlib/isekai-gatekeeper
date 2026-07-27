@@ -3,6 +3,7 @@ import { CacheKeyModeType } from "./cache";
 import { RulePresets } from "../utils/RulePresets";
 import { RuleRateLimit } from "../utils/RuleRateLimit";
 import type { RuleContext } from "./hono";
+import { RuleExpressionUtils } from "../utils/RuleUtils";
 
 // ── Rule input types (injected at runtime) ──────────────────────────────────
 
@@ -13,9 +14,7 @@ export interface RuleInput {
   presets: RulePresets;
   rateLimit: RuleRateLimit;
   state: Record<string, any>;
-  matchGlob: (str: string, pattern: string | string[]) => boolean;
-  match: (str: string, pattern: RegExp | RegExp[]) => boolean;
-  matchExtractGroup: (str: string, pattern: RegExp | RegExp[], groupName?: number | string) => string | null;
+  utils: RuleExpressionUtils;
   [key: string]: unknown;
 }
 

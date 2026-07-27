@@ -8,7 +8,7 @@ export interface CachedResponseMeta {
 }
 
 export interface CachedResponse extends CachedResponseMeta {
-  body: string;
+  body: Buffer;
 }
 
 export interface ConsumeRateLimitOptions {

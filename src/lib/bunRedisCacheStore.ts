@@ -104,7 +104,7 @@ export class BunRedisCacheStore implements ICacheStore {
 
 	public async set<T>(key: string, value: T, ttl?: number, _tags?: string[]): Promise<void> {
 		const payload = JSON.stringify(value);
-		if (payload.length > this.maxBodyBytes) return;
+		if (Buffer.byteLength(payload) > this.maxBodyBytes) return;
 
 		const effectiveTtl = this.resolveTtl(ttl);
 
@@ -127,9 +127,9 @@ export class BunRedisCacheStore implements ICacheStore {
 	public async getCachedResponse(key: string): Promise<CachedResponse | null> {
 		const keyMeta = metaKey(key);
 		const keyBody = bodyKey(key);
-		const result = await this.client.send("MGET", [keyMeta, keyBody]) as Array<string | null>;
-		const rawMeta = result[0];
-		const body = result[1];
+		const rawMeta = await this.client.get(keyMeta);
+		const bodyValue = await this.client.getBuffer(keyBody);
+		const body = bodyValue == null ? null : Buffer.from(bodyValue);
 		if (rawMeta == null) return null;
 
 		if (body == null) {
@@ -157,11 +157,11 @@ export class BunRedisCacheStore implements ICacheStore {
 		const effectiveTags = tags ?? value.tags;
 		const { body, ...meta } = { ...value, tags: effectiveTags };
 		const metaPayload = JSON.stringify(meta);
-		if (metaPayload.length + body.length > this.maxBodyBytes) return;
+		if (Buffer.byteLength(metaPayload) + body.length > this.maxBodyBytes) return;
 
 		await this.removeCachedResponseTagIndices(key);
 		await this.client.send("SET", [metaKey(key), metaPayload, "EX", String(effectiveTtl)]);
-		await this.client.send("SET", [bodyKey(key), body, "EX", String(effectiveTtl)]);
+		await this.client.set(bodyKey(key), body, "EX", effectiveTtl);
 
 		if (effectiveTags && effectiveTags.length > 0) {
 			const expiresAt = Date.now() + effectiveTtl * 1000;

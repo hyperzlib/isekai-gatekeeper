@@ -8,10 +8,19 @@ function makeResp(body: string, ttl = 60): CachedResponse {
   return {
     status: 200,
     headers: { "content-type": "text/html" },
-    body,
+    body: Buffer.from(body),
     cachedAt: Date.now(),
     ttl,
   };
+}
+
+function expectBody(body: Buffer | undefined, expected: string | number[]): void {
+  expect(body).not.toBeUndefined();
+  if (typeof expected === "string") {
+    expect(body!.toString("utf-8")).toBe(expected);
+  } else {
+    expect(Array.from(body!)).toEqual(expected);
+  }
 }
 
 const redisTestUrl = Bun.env["ISEKAI_TEST_REDIS_URL"];
@@ -27,7 +36,7 @@ describe("CacheStore", () => {
     await store.set("/foo", makeResp("hello"));
     const entry = await store.get<CachedResponse>("/foo");
     expect(entry).not.toBeNull();
-    expect(entry!.body).toBe("hello");
+    expectBody(entry!.body, "hello");
   });
 
   it("returns null for missing entries", async () => {
@@ -107,7 +116,23 @@ describe("CacheStore - CachedResponse API", () => {
     expect("body" in meta!).toBe(false);
 
     const entry = await store.getCachedResponse("/page");
-    expect(entry?.body).toBe("hello");
+    expectBody(entry?.body, "hello");
+  });
+
+  it("preserves cached response body bytes", async () => {
+    const store = new MemoryCacheStore(100, 1_000_000);
+    const body = Buffer.from([0, 0xff, 0x61, 0xc3, 0x28]);
+
+    await store.setCachedResponse("/binary-page", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+      body,
+      cachedAt: Date.now(),
+      ttl: 60,
+    }, 60);
+
+    const entry = await store.getCachedResponse("/binary-page");
+    expectBody(entry?.body, [0, 0xff, 0x61, 0xc3, 0x28]);
   });
 
   it("deleteCachedResponse removes response and tag indices", async () => {
@@ -386,7 +411,7 @@ describeRedis("BunRedisCacheStore - optional Redis integration", () => {
     expect("body" in meta!).toBe(false);
 
     const cached = await store.getCachedResponse(key);
-    expect(cached?.body).toBe("hello");
+    expectBody(cached?.body, "hello");
     expect(await store.listByPrefix(prefix)).toEqual([key]);
 
     await store.deleteCachedResponse(key);
@@ -490,7 +515,7 @@ describeRedis("RedisCacheStore - optional Redis integration", () => {
     expect("body" in meta!).toBe(false);
 
     const cached = await store.getCachedResponse(key);
-    expect(cached?.body).toBe("hello");
+    expectBody(cached?.body, "hello");
     expect(await store.listByPrefix(prefix)).toEqual([key]);
 
     await store.deleteCachedResponse(key);

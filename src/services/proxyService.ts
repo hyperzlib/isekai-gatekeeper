@@ -231,12 +231,11 @@ export class ProxyService {
             }
           }
 
-          const bodyText = bodyBuffer.toString("utf-8");
           const cacheTags = decision.cache_tags;
           await this.cacheService.setCachedResponse(decision.cache_key, {
             status: resp.status,
             headers: cachedHeaders,
-            body: bodyText,
+            body: bodyBuffer,
             cachedAt: Date.now(),
             ttl: decision.cache?.ttl ?? this.appConfig.cache.default_ttl,
             tags: cacheTags,
@@ -246,7 +245,7 @@ export class ProxyService {
             console.log(`[ProxyService] Cached: ${resp.status} ${requestUrl.pathname}${requestUrl.search} (key: ${decision.cache_key})`);
           }
 
-          return new Response(bodyText, {
+          return new Response(bodyBuffer, {
             status: resp.status,
             headers: responseHeaders,
           });

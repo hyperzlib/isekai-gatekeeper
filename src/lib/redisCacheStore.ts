@@ -94,6 +94,7 @@ return { count, limited and 1 or 0, math.max(0, maxRequests - count), storedRese
 
 export class RedisCacheStore implements ICacheStore {
   private client?: RedisClientType;
+  private binaryClient?: RedisClientType<Buffer>;
   private readonly redisUrl: string;
   private readonly maxBodyBytes: number;
   private readonly defaultTtl: number;
@@ -105,8 +106,11 @@ export class RedisCacheStore implements ICacheStore {
   }
 
   public async init(): Promise<void> {
-    const { createClient } = await import("redis");
+    const { createClient, RESP_TYPES } = await import("redis");
     this.client = createClient({ url: this.redisUrl });
+    this.binaryClient = this.client.withTypeMapping({
+      [RESP_TYPES.BLOB_STRING]: Buffer,
+    });
     if (!this.client.isOpen) {
       await this.client.connect();
     }
@@ -128,7 +132,7 @@ export class RedisCacheStore implements ICacheStore {
 
   public async set<T>(key: string, value: T, ttl?: number, _tags?: string[]): Promise<void> {
     const payload = JSON.stringify(value);
-    if (payload.length > this.maxBodyBytes) return;
+    if (Buffer.byteLength(payload) > this.maxBodyBytes) return;
 
     await this.getClient().set(key, payload, { EX: this.resolveTtl(ttl) });
   }
@@ -149,11 +153,11 @@ export class RedisCacheStore implements ICacheStore {
 
   public async getCachedResponse(key: string): Promise<CachedResponse | null> {
     const client = this.getClient();
+    const binaryClient = this.getBinaryClient();
     const keyMeta = metaKey(key);
     const keyBody = bodyKey(key);
-    const result = await client.sendCommand(["MGET", keyMeta, keyBody]) as Array<string | null>;
-    const rawMeta = result[0];
-    const body = result[1];
+    const rawMeta = await client.get(keyMeta);
+    const body = await binaryClient.get(keyBody);
     if (rawMeta == null) return null;
 
     if (body == null) {
@@ -182,7 +186,7 @@ export class RedisCacheStore implements ICacheStore {
     const effectiveTags = tags ?? value.tags;
     const { body, ...meta } = { ...value, tags: effectiveTags };
     const metaPayload = JSON.stringify(meta);
-    if (metaPayload.length + body.length > this.maxBodyBytes) return;
+    if (Buffer.byteLength(metaPayload) + body.length > this.maxBodyBytes) return;
 
     await this.removeCachedResponseTagIndices(key);
     await client.set(metaKey(key), metaPayload, { EX: effectiveTtl });
@@ -422,5 +426,12 @@ export class RedisCacheStore implements ICacheStore {
       throw new Error("RedisCacheStore is not initialized");
     }
     return this.client;
+  }
+
+  private getBinaryClient(): RedisClientType<Buffer> {
+    if (!this.binaryClient) {
+      throw new Error("RedisCacheStore is not initialized");
+    }
+    return this.binaryClient;
   }
 }

@@ -6,6 +6,7 @@ const config: AppConfig = {
 
   proxy: {
     server_port: 8080,
+    workers: 1, // 可设为 "auto"：Linux 使用逻辑 CPU 数，Windows/macOS 为 1；多 worker 需要 Redis，Windows/macOS 需手动设置数量并用 nginx 分流到连续端口
   },
 
   api: {

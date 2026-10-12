@@ -126,6 +126,7 @@ export interface GeoIPConfig {
 /** 代理服务器配置 */
 export interface ProxyConfig {
   server_port: number;
+  workers?: number | "auto";
 }
 
 /** API 服务器配置 */

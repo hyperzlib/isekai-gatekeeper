@@ -11,6 +11,14 @@
 - 可选的 GeoIP 信息
 - 页面缓存功能，支持通过API管理缓存
 
+## ProxyApp 多 worker
+
+在 `config.ts` 的 `proxy` 中设置 `workers`，默认是 `1`。单 worker 沿用原来的双端口单进程启动方式。设置为大于 `1` 时，主进程运行 ApiApp 和缓存索引清理任务，每个子进程仅运行 ProxyApp。此时必须把 `cache.provider` 设为 `"bun+redis"` 或 `"redis"`，并配置对应的 Redis URL，使页面缓存、限流和管理 API 共用状态。
+
+`workers` 也支持 `"auto"`：Linux 使用 `node:os.cpus().length` 返回的逻辑 CPU 数量，Windows/macOS 始终使用 `1`。Linux 自动解析出多个 worker 时同样需要 Redis。Windows/macOS 启动时会提示：需要多 worker 时手动设置数量，并使用 nginx 反向代理分流到各 worker 的连续端口。
+
+Linux 上所有 ProxyApp worker 共用 `proxy.server_port`。Windows/macOS 上 worker 从 `proxy.server_port` 开始逐个占用连续端口；例如 `server_port: 8080, workers: 3` 会监听 8080、8081、8082，`api.server_port` 必须在这个范围之外。Windows/macOS 部署时须让 nginx 将流量分配到全部 ProxyApp 端口。启动日志会列出 worker 编号、端口和进程号；意外退出的 worker 会在延迟后由主进程重启。
+
 ## 对比
 
 | 功能/项目          | Isekai Gatekeeper                      | [Cloudflare](https://www.cloudflare.com/) | [Anubis](https://anubis.io/) |

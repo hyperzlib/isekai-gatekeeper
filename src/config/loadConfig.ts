@@ -18,7 +18,7 @@ async function loadConfigModule(configPath: string): Promise<Record<string, unkn
   const fn = new Function("module", result.code);
   const module_: { exports: Record<string, unknown> } = { exports: {} };
   fn(module_);
-  
+
   if (!module_.exports.default || typeof module_.exports.default !== "object") {
     throw new Error(`Config file must export default { ... }, got ${typeof module_.exports.default}`);
   }
@@ -98,7 +98,7 @@ export async function loadConfig(configPath = env.CONFIG_PATH): Promise<AppConfi
   return {
     debug,
     templates_dir,
-    proxy: { server_port: proxy.server_port as number },
+    proxy: { server_port: proxy.server_port as number, workers: (proxy.workers ?? 1) as number | "auto" },
     api: { server_port: api.server_port as number, key: api.key as string },
     browser_challenge: {
       enabled: bc.enabled as boolean,

@@ -25,6 +25,8 @@ function expectBody(body: Buffer | undefined, expected: string | number[]): void
 
 const redisTestUrl = Bun.env["ISEKAI_TEST_REDIS_URL"];
 const describeRedis = redisTestUrl ? describe : describe.skip;
+const nodeRedisAvailable = await import("redis").then(() => true).catch(() => false);
+const describeNodeRedis = redisTestUrl && nodeRedisAvailable ? describe : describe.skip;
 
 function redisKeyPrefix(): string {
   return `test:${Date.now()}:${Math.random().toString(16).slice(2)}:`;
@@ -478,7 +480,7 @@ describeRedis("BunRedisCacheStore - optional Redis integration", () => {
   });
 });
 
-describeRedis("RedisCacheStore - optional Redis integration", () => {
+describeNodeRedis("RedisCacheStore - optional Redis integration", () => {
   async function makeRedisStore(): Promise<{ store: ICacheStore; prefix: string }> {
     const store = new RedisCacheStore(redisTestUrl!, 1_000_000, 60);
     await store.init();

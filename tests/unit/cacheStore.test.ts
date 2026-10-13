@@ -383,6 +383,15 @@ describeRedis("BunRedisCacheStore - optional Redis integration", () => {
     return { store, prefix: redisKeyPrefix() };
   }
 
+  it("closes its Redis connection", async () => {
+    const store = new BunRedisCacheStore(redisTestUrl!, 1_000_000, 60);
+    await store.init();
+    const client = (store as unknown as { client: { connected: boolean } }).client;
+    expect(client.connected).toBe(true);
+    await store.close();
+    expect(client.connected).toBe(false);
+  });
+
   it("stores generic values without using response cache keys", async () => {
     const { store, prefix } = await makeRedisStore();
     const key = `${prefix}generic`;
@@ -486,6 +495,15 @@ describeNodeRedis("RedisCacheStore - optional Redis integration", () => {
     await store.init();
     return { store, prefix: redisKeyPrefix() };
   }
+
+  it("closes its Redis connection", async () => {
+    const store = new RedisCacheStore(redisTestUrl!, 1_000_000, 60);
+    await store.init();
+    const client = (store as unknown as { client?: { isOpen?: boolean } }).client;
+    expect(client?.isOpen).toBe(true);
+    await store.close();
+    expect(client?.isOpen).toBe(false);
+  });
 
   it("stores generic values without using response cache keys", async () => {
     const { store, prefix } = await makeRedisStore();

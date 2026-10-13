@@ -10,6 +10,7 @@ declare module "redis" {
   export interface RedisClientType<TGetValue = string> {
     isOpen?: boolean;
     connect(): Promise<unknown>;
+    close(): Promise<void>;
     ping(): Promise<string>;
     get(key: string): Promise<TGetValue | null>;
     set(key: string, value: string | Buffer, options?: { EX?: number }): Promise<unknown>;

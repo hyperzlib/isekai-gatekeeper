@@ -90,6 +90,10 @@ export class BunRedisCacheStore implements ICacheStore {
 		await this.client.ping();
 	}
 
+	public async close(): Promise<void> {
+		this.client.close();
+	}
+
 	public async get<T>(key: string): Promise<T | null> {
 		const raw = await this.client.get(key);
 		if (raw == null) return null;

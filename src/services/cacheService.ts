@@ -61,6 +61,12 @@ export class CacheService {
     }
   }
 
+  public async close(): Promise<void> {
+    if (this.store) {
+      await this.store.close();
+    }
+  }
+
   public get<T>(key: string): Promise<T | null> {
     return this.store.get<T>(key);
   }

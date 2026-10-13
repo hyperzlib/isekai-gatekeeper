@@ -29,6 +29,7 @@ export interface ConsumeRateLimitResult {
 
 export interface ICacheStore {
   init(): Promise<void>;
+  close(): Promise<void>;
   get<T>(key: string): Promise<T | null>;
   set<T>(key: string, resp: T, ttl?: number, tags?: string[]): Promise<void>;
   getCachedResponseMeta(key: string): Promise<CachedResponseMeta | null>;

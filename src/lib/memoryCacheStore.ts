@@ -37,6 +37,8 @@ export class MemoryCacheStore implements ICacheStore {
 
   public async init(): Promise<void> { }
 
+  public async close(): Promise<void> { }
+
   public async get<T>(key: string): Promise<T | null> {
     const entry = this.store.get(key);
     if (!entry) return null;

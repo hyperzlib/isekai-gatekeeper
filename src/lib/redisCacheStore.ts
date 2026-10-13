@@ -117,6 +117,15 @@ export class RedisCacheStore implements ICacheStore {
     await this.client.ping();
   }
 
+  public async close(): Promise<void> {
+    const client = this.client;
+    this.client = undefined;
+    this.binaryClient = undefined;
+    if (client?.isOpen) {
+      await client.close();
+    }
+  }
+
   public async get<T>(key: string): Promise<T | null> {
     const client = this.getClient();
     const raw = await client.get(key);

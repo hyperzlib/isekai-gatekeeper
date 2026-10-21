@@ -9,6 +9,10 @@ import { getRequestIp } from "./request";
 export class RulePresets {
   constructor(private readonly ctx: AppContext) { }
 
+  public get isReadMethod(): boolean {
+    return ['GET', 'HEAD', 'OPTIONS'].includes(this.ctx.req.method.toUpperCase());
+  }
+
   public get isCommonSearchEngineBot(): boolean {
     const ua = this.ctx.req.header("user-agent") ?? "";
     return /Googlebot|MSN|Bingbot|Slurp|DuckDuckBot|Baiduspider|Bytespider|SiteSearch360|360Spider|YisouSpider|Y!J-DLC|Yahoo! Slurp|YandexBot/i.test(ua);
